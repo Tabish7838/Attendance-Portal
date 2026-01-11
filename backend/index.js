@@ -1,437 +1,431 @@
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const XLSX = require("xlsx");
+const { createClient } = require("@supabase/supabase-js");
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables");
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false },
+});
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const db = new sqlite3.Database("attendance.db");
+const asyncHandler = (handler) => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS students (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      roll_no INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      teacher_id TEXT NOT NULL,
-      UNIQUE(teacher_id, roll_no)
-    )
-  `);
+const respondWithError = (res, error, fallbackMessage) => {
+  console.error(error);
+  const status = error?.status || 500;
+  const message = fallbackMessage || "Unexpected error";
+  return res.status(status).json({ message, error: error?.message });
+};
 
-  db.run("ALTER TABLE students ADD COLUMN teacher_id TEXT", err => {
-    if (err && !err.message.includes("duplicate column name")) {
-      console.error("Failed to add teacher_id column to students", err.message);
+app.get(
+  "/students",
+  asyncHandler(async (req, res) => {
+    const teacherId = req.query.teacher_id;
+
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacher_id query parameter is required" });
     }
-  });
 
-  db.run(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_students_teacher_roll ON students(teacher_id, roll_no)"
-  );
+    const { data, error } = await supabase
+      .from("students")
+      .select("id, roll_no, name")
+      .eq("teacher_id", teacherId)
+      .order("roll_no", { ascending: true });
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      student_id INTEGER,
-      date TEXT,
-      status TEXT,
-      teacher_id TEXT
-    )
-  `);
-
-  db.run("ALTER TABLE attendance ADD COLUMN teacher_id TEXT", err => {
-    if (err && !err.message.includes("duplicate column name")) {
-      console.error("Failed to add teacher_id column", err.message);
+    if (error) {
+      return respondWithError(res, error, "Failed to fetch students");
     }
-  });
-  db.run(`
-    CREATE TABLE IF NOT EXISTS user_profiles (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      supabase_id TEXT UNIQUE,
-      username TEXT,
-      username_normalized TEXT UNIQUE,
-      email TEXT
-    )
-  `);
-});
 
-app.get("/students", (req, res) => {
-  const teacherId = req.query.teacher_id;
+    return res.json(data || []);
+  })
+);
 
-  if (!teacherId) {
-    return res.status(400).json({ message: "teacher_id query parameter is required" });
-  }
+app.delete(
+  "/students",
+  asyncHandler(async (req, res) => {
+    const teacherId = req.query.teacher_id;
+    const rollNo = req.query.roll_no;
 
-  db.all(
-    "SELECT id, roll_no, name FROM students WHERE teacher_id = ? ORDER BY roll_no ASC",
-    [teacherId],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to fetch students", error: err.message });
+    if (!teacherId || !rollNo) {
+      return res
+        .status(400)
+        .json({ message: "teacher_id and roll_no query parameters are required" });
+    }
+
+    const numericRoll = Number(rollNo);
+    if (!Number.isInteger(numericRoll) || numericRoll <= 0) {
+      return res.status(400).json({ message: "roll_no must be a positive integer" });
+    }
+
+    const { data: row, error: lookupError } = await supabase
+      .from("students")
+      .select("id")
+      .eq("teacher_id", teacherId)
+      .eq("roll_no", numericRoll)
+      .maybeSingle();
+
+    if (lookupError) {
+      return respondWithError(res, lookupError, "Failed to lookup student");
+    }
+
+    if (!row) {
+      return res.status(404).json({ message: "Student not found for provided roll number" });
+    }
+
+    const studentId = row.id;
+
+    const { error: deleteAttendanceError } = await supabase
+      .from("attendance")
+      .delete()
+      .eq("student_id", studentId)
+      .eq("teacher_id", teacherId);
+
+    if (deleteAttendanceError) {
+      return respondWithError(res, deleteAttendanceError, "Failed to delete attendance for student");
+    }
+
+    const { error: deleteStudentError } = await supabase
+      .from("students")
+      .delete()
+      .eq("id", studentId)
+      .eq("teacher_id", teacherId);
+
+    if (deleteStudentError) {
+      return respondWithError(res, deleteStudentError, "Failed to delete student");
+    }
+
+    return res.json({ message: "Student deleted", student_id: studentId });
+  })
+);
+
+app.post(
+  "/students",
+  asyncHandler(async (req, res) => {
+    const { teacher_id: teacherId, roll_no: rollNo, name } = req.body || {};
+
+    if (!teacherId || (!rollNo && rollNo !== 0) || !name?.trim()) {
+      return res
+        .status(400)
+        .json({ message: "teacher_id, roll_no, and name are required to add a student" });
+    }
+
+    const payload = {
+      teacher_id: teacherId,
+      roll_no: Number(rollNo),
+      name: name.trim(),
+    };
+
+    const { data, error } = await supabase
+      .from("students")
+      .insert(payload)
+      .select("id, roll_no, name")
+      .single();
+
+    if (error) {
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "Roll number already exists for this teacher" });
       }
-      res.json(rows);
+      return respondWithError(res, error, "Failed to add student");
     }
-  );
-});
 
-app.delete("/students", (req, res) => {
-  const teacherId = req.query.teacher_id;
-  const rollNo = req.query.roll_no;
+    return res.status(201).json(data);
+  })
+);
 
-  if (!teacherId || (!rollNo && rollNo !== "0")) {
-    return res
-      .status(400)
-      .json({ message: "teacher_id and roll_no query parameters are required" });
-  }
+app.post(
+  "/attendance",
+  asyncHandler(async (req, res) => {
+    const { teacher_id: teacherId, records = [], date } = req.body || {};
 
-  const numericRoll = Number(rollNo);
-  if (!Number.isInteger(numericRoll) || numericRoll <= 0) {
-    return res.status(400).json({ message: "roll_no must be a positive integer" });
-  }
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacher_id is required" });
+    }
 
-  db.serialize(() => {
-    db.get(
-      "SELECT id FROM students WHERE teacher_id = ? AND roll_no = ?",
-      [teacherId, numericRoll],
-      (err, row) => {
-        if (err) {
-          return res.status(500).json({ message: "Failed to lookup student", error: err.message });
-        }
+    if (!Array.isArray(records)) {
+      return res.status(400).json({ message: "records must be an array" });
+    }
 
-        if (!row) {
-          return res.status(404).json({ message: "Student not found for provided roll number" });
-        }
-
-        const studentId = row.id;
-
-        db.run("BEGIN TRANSACTION");
-
-        db.run(
-          "DELETE FROM attendance WHERE student_id = ? AND teacher_id = ?",
-          [studentId, teacherId],
-          deleteAttendanceErr => {
-            if (deleteAttendanceErr) {
-              db.run("ROLLBACK");
-              return res
-                .status(500)
-                .json({
-                  message: "Failed to delete attendance for student",
-                  error: deleteAttendanceErr.message,
-                });
-            }
-
-            db.run(
-              "DELETE FROM students WHERE id = ?",
-              [studentId],
-              deleteStudentErr => {
-                if (deleteStudentErr) {
-                  db.run("ROLLBACK");
-                  return res
-                    .status(500)
-                    .json({
-                      message: "Failed to delete student",
-                      error: deleteStudentErr.message,
-                    });
-                }
-
-                db.run("COMMIT", commitErr => {
-                  if (commitErr) {
-                    db.run("ROLLBACK");
-                    return res.status(500).json({ message: "Failed to finalize deletion", error: commitErr.message });
-                  }
-
-                  res.json({ message: "Student deleted", student_id: studentId });
-                });
-              }
-            );
-          }
-        );
-      }
+    const invalidRecord = records.some(
+      (record) =>
+        !record || typeof record.student_id === "undefined" || typeof record.status !== "string"
     );
-  });
-});
 
-app.post("/students", (req, res) => {
-  const { teacher_id: teacherId, roll_no: rollNo, name } = req.body || {};
-
-  if (!teacherId || (!rollNo && rollNo !== 0) || !name?.trim()) {
-    return res
-      .status(400)
-      .json({ message: "teacher_id, roll_no, and name are required to add a student" });
-  }
-
-  db.run(
-    "INSERT INTO students (roll_no, name, teacher_id) VALUES (?,?,?)",
-    [Number(rollNo), name.trim(), teacherId],
-    function (err) {
-      if (err) {
-        if (err.message?.includes("idx_students_teacher_roll")) {
-          return res.status(409).json({ message: "Roll number already exists for this teacher" });
-        }
-        return res.status(500).json({ message: "Failed to add student", error: err.message });
-      }
-      res.status(201).json({ id: this.lastID, roll_no: Number(rollNo), name: name.trim() });
+    if (invalidRecord) {
+      return res.status(400).json({ message: "Each record must include student_id and status" });
     }
-  );
-});
 
-app.post("/attendance", (req, res) => {
-  const { teacher_id: teacherId, records = [], date } = req.body;
+    const targetDate = date || new Date().toISOString().split("T")[0];
 
-  if (!teacherId) {
-    return res.status(400).json({ message: "teacher_id is required" });
-  }
-  if (!Array.isArray(records)) {
-    return res.status(400).json({ message: "records must be an array" });
-  }
+    const { error: deleteError } = await supabase
+      .from("attendance")
+      .delete()
+      .eq("teacher_id", teacherId)
+      .eq("date", targetDate);
 
-  const invalidRecord = records.some(
-    record =>
-      !record || typeof record.student_id === "undefined" || typeof record.status !== "string"
-  );
+    if (deleteError) {
+      return respondWithError(res, deleteError, "Failed to clear existing records");
+    }
 
-  if (invalidRecord) {
-    return res.status(400).json({ message: "Each record must include student_id and status" });
-  }
+    if (records.length === 0) {
+      return res.json({ message: "Attendance saved" });
+    }
 
-  const targetDate = date || new Date().toISOString().split("T")[0];
+    const rows = records.map((record) => ({
+      student_id: record.student_id,
+      status: record.status,
+      date: targetDate,
+      teacher_id: teacherId,
+    }));
 
-  db.serialize(() => {
-    db.run("BEGIN TRANSACTION");
+    const { error: insertError } = await supabase.from("attendance").insert(rows);
 
-    db.run(
-      "DELETE FROM attendance WHERE date = ? AND teacher_id = ?",
-      [targetDate, teacherId],
-      err => {
-        if (err) {
-          db.run("ROLLBACK");
-          return res
-            .status(500)
-            .json({ message: "Failed to clear existing records", error: err.message });
-        }
+    if (insertError) {
+      return respondWithError(res, insertError, "Failed to save attendance");
+    }
 
-        if (records.length === 0) {
-          db.run("COMMIT", commitErr => {
-            if (commitErr) {
-              db.run("ROLLBACK");
-              return res
-                .status(500)
-                .json({ message: "Failed to finalize attendance", error: commitErr.message });
-            }
-            res.json({ message: "Attendance saved" });
-          });
-          return;
-        }
+    return res.json({ message: "Attendance saved" });
+  })
+);
 
-        const stmt = db.prepare(
-          "INSERT INTO attendance (student_id, date, status, teacher_id) VALUES (?,?,?,?)"
-        );
+app.get(
+  "/attendance",
+  asyncHandler(async (req, res) => {
+    const teacherId = req.query.teacher_id;
+    const targetDate = req.query.date || new Date().toISOString().split("T")[0];
 
-        records.forEach(record => {
-          stmt.run([record.student_id, targetDate, record.status, teacherId]);
-        });
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacher_id query parameter is required" });
+    }
 
-        stmt.finalize(errFinalize => {
-          if (errFinalize) {
-            db.run("ROLLBACK");
-            return res
-              .status(500)
-              .json({ message: "Failed to save attendance", error: errFinalize.message });
-          }
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("student_id, status")
+      .eq("teacher_id", teacherId)
+      .eq("date", targetDate);
 
-          db.run("COMMIT", commitErr => {
-            if (commitErr) {
-              db.run("ROLLBACK");
-              return res
-                .status(500)
-                .json({ message: "Failed to finalize attendance", error: commitErr.message });
-            }
-            res.json({ message: "Attendance saved" });
-          });
-        });
-      }
+    if (error) {
+      return respondWithError(res, error, "Failed to fetch attendance");
+    }
+
+    return res.json({ date: targetDate, records: data || [] });
+  })
+);
+
+app.get(
+  "/attendance/latest-date",
+  asyncHandler(async (req, res) => {
+    const teacherId = req.query.teacher_id;
+
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacher_id query parameter is required" });
+    }
+
+    const { data, error } = await supabase
+      .from("attendance")
+      .select("date")
+      .eq("teacher_id", teacherId)
+      .order("date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      return respondWithError(res, error, "Failed to retrieve latest attendance date");
+    }
+
+    return res.json({ date: data?.date || null });
+  })
+);
+
+app.post(
+  "/users",
+  asyncHandler(async (req, res) => {
+    const { supabase_id: supabaseId, username, email } = req.body || {};
+
+    if (!supabaseId || !username || !email) {
+      return res.status(400).json({ message: "supabase_id, username, and email are required" });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const { data: existingUsername, error: usernameLookupError } = await supabase
+      .from("user_profiles")
+      .select("supabase_id")
+      .eq("username_normalized", normalizedUsername)
+      .not("supabase_id", "eq", supabaseId)
+      .limit(1);
+
+    if (usernameLookupError) {
+      return respondWithError(res, usernameLookupError, "Failed to verify username availability");
+    }
+
+    if (existingUsername && existingUsername.length > 0) {
+      return res.status(409).json({ message: "Username already in use" });
+    }
+
+    const { error } = await supabase.from("user_profiles").upsert(
+      {
+        supabase_id: supabaseId,
+        username: username.trim(),
+        username_normalized: normalizedUsername,
+        email: email.trim(),
+      },
+      { onConflict: "supabase_id" }
     );
-  });
-});
 
-app.get("/attendance", (req, res) => {
-  const teacherId = req.query.teacher_id;
-  const targetDate = req.query.date || new Date().toISOString().split("T")[0];
-
-  if (!teacherId) {
-    return res.status(400).json({ message: "teacher_id query parameter is required" });
-  }
-
-  db.all(
-    "SELECT student_id, status FROM attendance WHERE teacher_id = ? AND date = ?",
-    [teacherId, targetDate],
-    (err, rows) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to fetch attendance", error: err.message });
-      }
-      res.json({ date: targetDate, records: rows });
-    }
-  );
-});
-
-app.get("/attendance/latest-date", (req, res) => {
-  const teacherId = req.query.teacher_id;
-
-  if (!teacherId) {
-    return res.status(400).json({ message: "teacher_id query parameter is required" });
-  }
-
-  db.get(
-    "SELECT date FROM attendance WHERE teacher_id = ? ORDER BY date DESC LIMIT 1",
-    [teacherId],
-    (err, row) => {
-      if (err) {
-        return res
-          .status(500)
-          .json({ message: "Failed to retrieve latest attendance date", error: err.message });
-      }
-
-      res.json({ date: row?.date || null });
-    }
-  );
-});
-
-app.post("/users", (req, res) => {
-  const { supabase_id: supabaseId, username, email } = req.body;
-
-  if (!supabaseId || !username || !email) {
-    return res.status(400).json({ message: "supabase_id, username, and email are required" });
-  }
-
-  const normalizedUsername = username.trim().toLowerCase();
-
-  db.run(
-    `INSERT INTO user_profiles (supabase_id, username, username_normalized, email)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(supabase_id) DO UPDATE SET
-       username = excluded.username,
-       username_normalized = excluded.username_normalized,
-       email = excluded.email`,
-    [supabaseId, username.trim(), normalizedUsername, email.trim()],
-    err => {
-      if (err) {
-        if (err.message?.includes("user_profiles.username_normalized")) {
-          return res.status(409).json({ message: "Username already in use" });
-        }
-        return res.status(500).json({ message: "Failed to save profile", error: err.message });
-      }
-      res.status(201).json({ message: "Profile saved" });
-    }
-  );
-});
-
-app.get("/users/by-username/:username", (req, res) => {
-  const normalizedUsername = req.params.username.trim().toLowerCase();
-  db.get(
-    "SELECT email FROM user_profiles WHERE username_normalized = ?",
-    [normalizedUsername],
-    (err, row) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to retrieve user", error: err.message });
-      }
-      if (!row) {
-        return res.status(404).json({ message: "Username not found" });
-      }
-      res.json({ email: row.email });
-    }
-  );
-});
-
-app.get("/users/by-email/:email", (req, res) => {
-  const email = req.params.email.trim().toLowerCase();
-  db.get(
-    "SELECT username FROM user_profiles WHERE LOWER(email) = ?",
-    [email],
-    (err, row) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to retrieve user", error: err.message });
-      }
-      if (!row) {
-        return res.status(404).json({ message: "Email not found" });
-      }
-      res.json(row);
-    }
-  );
-});
-
-app.get("/users/:supabaseId", (req, res) => {
-  db.get(
-    "SELECT username, email FROM user_profiles WHERE supabase_id = ?",
-    [req.params.supabaseId],
-    (err, row) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to retrieve profile", error: err.message });
-      }
-      if (!row) {
-        return res.status(404).json({ message: "Profile not found" });
-      }
-      res.json(row);
-    }
-  );
-});
-
-app.listen(3000, () => {
-  console.log("Backend running on port 3000");
-});
-
-app.get("/export", (req, res) => {
-  const teacherId = req.query.teacher_id;
-  const exportDate = req.query.date;
-
-  if (!teacherId) {
-    return res.status(400).json({ message: "teacher_id query parameter is required" });
-  }
-
-  const queryParams = [teacherId];
-  let dateClause = "";
-
-  if (exportDate) {
-    queryParams.push(exportDate);
-    dateClause = " AND a.date = ?";
-  }
-
-  queryParams.push(teacherId);
-
-  const query = `
-    SELECT
-      s.roll_no AS rollNo,
-      s.name AS name,
-      COUNT(a.id) AS totalClasses,
-      COALESCE(SUM(CASE WHEN a.status = 'Present' THEN 1 ELSE 0 END), 0) AS present,
-      COALESCE(SUM(CASE WHEN a.status = 'Absent' THEN 1 ELSE 0 END), 0) AS absent
-    FROM students s
-    LEFT JOIN attendance a
-      ON a.student_id = s.id
-     AND a.teacher_id = ?${dateClause}
-    WHERE s.teacher_id = ?
-    GROUP BY s.id
-    ORDER BY s.roll_no;
-  `;
-
-  db.all(query, queryParams, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ message: "Failed to build export", error: err.message });
+    if (error) {
+      return respondWithError(res, error, "Failed to save profile");
     }
 
-    const data = rows.map(row => {
-      const percentage = row.totalClasses
-        ? ((row.present / row.totalClasses) * 100).toFixed(2)
-        : "0";
+    return res.status(201).json({ message: "Profile saved" });
+  })
+);
+
+app.get(
+  "/users/by-username/:username",
+  asyncHandler(async (req, res) => {
+    const normalizedUsername = req.params.username.trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("email")
+      .eq("username_normalized", normalizedUsername)
+      .maybeSingle();
+
+    if (error) {
+      return respondWithError(res, error, "Failed to retrieve user");
+    }
+
+    if (!data) {
+      return res.status(404).json({ message: "Username not found" });
+    }
+
+    return res.json({ email: data.email });
+  })
+);
+
+app.get(
+  "/users/by-email/:email",
+  asyncHandler(async (req, res) => {
+    const email = req.params.email.trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("username")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error) {
+      return respondWithError(res, error, "Failed to retrieve user");
+    }
+
+    if (!data) {
+      return res.status(404).json({ message: "Email not found" });
+    }
+
+    return res.json(data);
+  })
+);
+
+app.get(
+  "/users/:supabaseId",
+  asyncHandler(async (req, res) => {
+    const { supabaseId } = req.params;
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("username, email")
+      .eq("supabase_id", supabaseId)
+      .maybeSingle();
+
+    if (error) {
+      return respondWithError(res, error, "Failed to retrieve profile");
+    }
+
+    if (!data) {
+      return res.status(404).json({ message: "Profile not found" });
+    }
+
+    return res.json(data);
+  })
+);
+
+app.get(
+  "/export",
+  asyncHandler(async (req, res) => {
+    const teacherId = req.query.teacher_id;
+    const exportDate = req.query.date;
+
+    if (!teacherId) {
+      return res.status(400).json({ message: "teacher_id query parameter is required" });
+    }
+
+    const { data: students, error: studentsError } = await supabase
+      .from("students")
+      .select("id, roll_no, name")
+      .eq("teacher_id", teacherId)
+      .order("roll_no", { ascending: true });
+
+    if (studentsError) {
+      return respondWithError(res, studentsError, "Failed to build export");
+    }
+
+    let attendanceQuery = supabase
+      .from("attendance")
+      .select("student_id, status")
+      .eq("teacher_id", teacherId);
+
+    if (exportDate) {
+      attendanceQuery = attendanceQuery.eq("date", exportDate);
+    }
+
+    const { data: attendanceRows, error: attendanceError } = await attendanceQuery;
+
+    if (attendanceError) {
+      return respondWithError(res, attendanceError, "Failed to build export");
+    }
+
+    const attendanceByStudent = new Map();
+    (attendanceRows || []).forEach((record) => {
+      if (!attendanceByStudent.has(record.student_id)) {
+        attendanceByStudent.set(record.student_id, { total: 0, present: 0, absent: 0 });
+      }
+      const stats = attendanceByStudent.get(record.student_id);
+      stats.total += 1;
+      if (record.status === "Present") {
+        stats.present += 1;
+      } else if (record.status === "Absent") {
+        stats.absent += 1;
+      }
+    });
+
+    const data = (students || []).map((student) => {
+      const stats = attendanceByStudent.get(student.id) || { total: 0, present: 0, absent: 0 };
+      const percentage = stats.total > 0 ? ((stats.present / stats.total) * 100).toFixed(2) : "0";
 
       return {
-        "Roll No": row.rollNo,
-        "Name": row.name,
-        "Total Classes": row.totalClasses,
-        "Present": row.present,
-        "Absent": row.absent,
-        "Percentage": percentage
+        "Roll No": student.roll_no,
+        "Name": student.name,
+        "Total Classes": stats.total,
+        "Present": stats.present,
+        "Absent": stats.absent,
+        "Percentage": percentage,
       };
     });
 
@@ -442,6 +436,16 @@ app.get("/export", (req, res) => {
     const filePath = "attendance.xlsx";
     XLSX.writeFile(wb, filePath);
 
-    res.download(filePath);
-  });
+    return res.download(filePath);
+  })
+);
+
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error", err);
+  res.status(500).json({ message: "Internal server error" });
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Backend running on port ${port}`);
 });

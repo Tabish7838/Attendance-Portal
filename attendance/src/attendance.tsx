@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabase";
+import { buildApiUrl } from "./config";
 
 type NavKey = "home" | "mark" | "summary" | "roster";
 
@@ -52,7 +53,7 @@ function Attendance() {
 
     const loadProfile = async () => {
       try {
-        const res = await fetch(`http://localhost:3000/users/${user.id}`);
+        const res = await fetch(buildApiUrl(`/users/${user.id}`));
         if (res.ok) {
           const data = await res.json();
           setProfile(data);
@@ -61,7 +62,7 @@ function Attendance() {
 
         if (res.status === 404 && user.email) {
           const fallback = await fetch(
-            `http://localhost:3000/users/by-email/${encodeURIComponent(user.email)}`
+            buildApiUrl(`/users/by-email/${encodeURIComponent(user.email)}`)
           );
           if (fallback.ok) {
             const data = await fallback.json();
@@ -82,7 +83,7 @@ function Attendance() {
   const fetchStudents = async (teacherId: string) => {
     try {
       setStudentsLoading(true);
-      const res = await fetch(`http://localhost:3000/students?teacher_id=${teacherId}`);
+      const res = await fetch(buildApiUrl(`/students?teacher_id=${teacherId}`));
       if (!res.ok) {
         throw new Error("Failed to load students");
       }
@@ -143,7 +144,7 @@ function Attendance() {
     setDeleteLoading(true);
 
     try {
-      const url = new URL("http://localhost:3000/students");
+      const url = new URL(buildApiUrl("/students"));
       url.searchParams.set("teacher_id", user.id);
       url.searchParams.set("roll_no", rollNumber.toString());
 
@@ -190,10 +191,9 @@ function Attendance() {
 
     const controller = new AbortController();
 
-    fetch(
-      `http://localhost:3000/attendance?teacher_id=${user.id}&date=${selectedDate}`,
-      { signal: controller.signal }
-    )
+    fetch(buildApiUrl(`/attendance?teacher_id=${user.id}&date=${selectedDate}`), {
+      signal: controller.signal,
+    })
       .then(res => {
         if (!res.ok) {
           throw new Error("Failed to load attendance");
@@ -236,7 +236,7 @@ function Attendance() {
     const loadLatestDate = async () => {
       try {
         const res = await fetch(
-          `http://localhost:3000/attendance/latest-date?teacher_id=${user.id}`,
+          buildApiUrl(`/attendance/latest-date?teacher_id=${user.id}`),
           { signal: controller.signal }
         );
 
@@ -301,7 +301,7 @@ function Attendance() {
         status,
       }));
 
-    fetch("http://localhost:3000/attendance", {
+    fetch(buildApiUrl("/attendance"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -329,7 +329,7 @@ function Attendance() {
       return;
     }
 
-    const url = new URL("http://localhost:3000/export");
+    const url = new URL(buildApiUrl("/export"));
     url.searchParams.set("teacher_id", user.id);
 
     window.open(url.toString(), "_blank", "noopener");
@@ -366,7 +366,7 @@ function Attendance() {
     setStudentSaving(true);
 
     try {
-      const res = await fetch("http://localhost:3000/students", {
+      const res = await fetch(buildApiUrl("/students"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

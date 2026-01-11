@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import { buildApiUrl } from "./config";
 import { useNavigate } from "react-router-dom";
 
 function Login() {
@@ -28,7 +29,7 @@ function Login() {
     if (!loginEmail.includes("@")) {
       try {
         const res = await fetch(
-          `http://localhost:3000/users/by-username/${encodeURIComponent(loginEmail)}`
+          buildApiUrl(`/users/by-username/${encodeURIComponent(loginEmail)}`)
         );
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));
@@ -60,7 +61,7 @@ function Login() {
 
     try {
       const check = await fetch(
-        `http://localhost:3000/users/by-username/${encodeURIComponent(desiredUsername)}`
+        buildApiUrl(`/users/by-username/${encodeURIComponent(desiredUsername)}`)
       );
       if (check.ok) {
         alert("That username is already taken. Please choose another.");
@@ -84,7 +85,7 @@ function Login() {
     else {
       const supabaseUser = data.user;
       if (supabaseUser) {
-        const response = await fetch("http://localhost:3000/users", {
+        const response = await fetch(buildApiUrl("/users"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
