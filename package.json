@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix attendance",
+    "install:frontend": "npm install --prefix attendance",
+    "build": "npm run build --prefix attendance"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.89.0"
+  }
+}
