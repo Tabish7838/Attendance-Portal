@@ -1,14 +1,22 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import type { ChangeEvent, FormEvent } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./supabase";
+
+type NavKey = "home" | "mark" | "summary" | "roster";
+
+const NAV_ITEMS: Array<{ key: NavKey; label: string; icon: string; path: string }> = [
+  { key: "home", label: "Home", icon: "🏠", path: "/attendance" },
+  { key: "mark", label: "Attendance", icon: "✅", path: "/attendance/mark" },
+  { key: "summary", label: "Absences", icon: "📉", path: "/attendance/summary" },
+  { key: "roster", label: "Roster", icon: "👥", path: "/attendance/roster" },
+];
 
 type Student = {
   id: number;
   roll_no: number;
   name: string;
 };
-
-type SectionKey = "home" | "taking-attendance" | "absent-summary" | "manage-roster";
 
 function Attendance() {
   const navigate = useNavigate();
@@ -28,7 +36,8 @@ function Attendance() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState<SectionKey>("home");
+  const location = useLocation();
+  const [activeNav, setActiveNav] = useState<NavKey>("home");
 
   /* 🔒 AUTH PROTECTION */
   useEffect(() => {
@@ -87,45 +96,21 @@ function Attendance() {
     }
   };
 
-  const sectionOrder: SectionKey[] = ["home", "taking-attendance", "absent-summary", "manage-roster"];
-
-  const scrollToSection = (section: SectionKey) => {
-    if (section === "home") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      setActiveSection("home");
+  useEffect(() => {
+    if (!location.pathname.startsWith("/attendance")) {
       return;
     }
 
-    const element = document.getElementById(section);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    const matched = NAV_ITEMS.find(item => item.path === location.pathname);
+    if (matched) {
+      setActiveNav(matched.key);
+    } else {
+      setActiveNav("home");
+      if (location.pathname !== "/attendance") {
+        navigate("/attendance", { replace: true });
+      }
     }
-
-    setActiveSection(section);
-  };
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const offset = window.scrollY + 150;
-      let current: SectionKey = "home";
-
-      sectionOrder.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const top = el.offsetTop;
-        if (offset >= top) {
-          current = id;
-        }
-      });
-
-      setActiveSection(prev => (prev === current ? prev : current));
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [location.pathname, navigate]);
 
   const handleDeleteStudent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -417,239 +402,269 @@ function Attendance() {
   const absentCount = absentStudents.length;
   const attendanceRate = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
 
-  return (
-    <div className="attendance-shell" id="home">
-      <nav className="attendance-nav">
-        <span className="nav-brand">Daily Attendance</span>
-        <div className="nav-links">
-          <button
-            type="button"
-            className={`nav-link-btn ${activeSection === "home" ? "is-active" : ""}`}
-            onClick={() => scrollToSection("home")}
-          >
-            Home
-          </button>
-          <button
-            type="button"
-            className={`nav-link-btn ${activeSection === "taking-attendance" ? "is-active" : ""}`}
-            onClick={() => scrollToSection("taking-attendance")}
-          >
-            Taking Attendance
-          </button>
-          <button
-            type="button"
-            className={`nav-link-btn ${activeSection === "absent-summary" ? "is-active" : ""}`}
-            onClick={() => scrollToSection("absent-summary")}
-          >
-            Absent Summary
-          </button>
-          <button
-            type="button"
-            className={`nav-link-btn ${activeSection === "manage-roster" ? "is-active" : ""}`}
-            onClick={() => scrollToSection("manage-roster")}
-          >
-            Manage Roster
-          </button>
-        </div>
-      </nav>
-      <main className="page-shell">
-        <header className="attendance-hero">
-          <div className="hero-content" id="hero">
-            <span className="section-label">Attendance dashboard</span>
-            <h1>Run your daily roll call with confidence.</h1>
-            <p>
-              Mark each student, review who missed class, and export records in a single view. Your
-              roster and attendance history stay synced to your account.
-            </p>
-            <div className="hero-actions">
-              <div className="date-control">
-                <label htmlFor="attendance-date">Attendance date</label>
-                <input
-                  id="attendance-date"
-                  type="date"
-                  value={selectedDate}
-                  onChange={handleDateChange}
-                />
-              </div>
-              <div className="identity-chip">
-                <span className="chip-title">Logged in as</span>
+  const renderHome = () => (
+    <div className="mobile-dashboard">
+      <section className="card-block overview-card">
+        <header className="card-header">
+          <span className="section-label">Attendance dashboard</span>
+          <h1>Run your daily roll call with confidence.</h1>
+          <p>
+            Manage your roster, mark attendance, and track absences without leaving your phone.
+            Everything stays synced to your account.
+          </p>
+        </header>
+        <div className="overview-body">
+          <div className="overview-meta">
+            <div className="meta-block">
+              <label htmlFor="attendance-date-home">Attendance date</label>
+              <input
+                id="attendance-date-home"
+                type="date"
+                value={selectedDate}
+                onChange={handleDateChange}
+              />
+            </div>
+            <div className="meta-block">
+              <label>Logged in as</label>
+              <div className="profile-chip">
                 <strong>{profile?.username?.trim() || profile?.email || user?.email || "Teacher"}</strong>
-              </div>
-              <div className="hero-buttons">
-                <button className="btn btn-outline" onClick={downloadExcel}>
-                  Download Excel
-                </button>
-                <button className="btn btn-ghost" onClick={logout}>
-                  Logout
-                </button>
+                <span>{profile?.email || user?.email}</span>
               </div>
             </div>
           </div>
-          <div className="hero-stats" aria-label="Attendance overview">
-            <div className="stat-card">
-              <span>Total students</span>
-              <strong>{totalStudents}</strong>
-            </div>
-            <div className="stat-card positive">
-              <span>Present today</span>
-              <strong>{presentCount}</strong>
-              <small>{attendanceRate}% attendance</small>
-            </div>
-            <div className="stat-card alert">
-              <span>Absent today</span>
-              <strong>{absentCount}</strong>
-              <small>{totalStudents > 0 ? totalStudents - presentCount : 0} not marked</small>
-            </div>
+
+          <div className="quick-actions">
+            <button className="btn btn-outline" onClick={downloadExcel}>
+              Export full history
+            </button>
+            <button className="btn btn-ghost" onClick={logout}>
+              Logout
+            </button>
           </div>
+        </div>
+
+        <div className="stats-strip" aria-label="Attendance overview">
+          <div className="stat-pill info">
+            <span>Total students</span>
+            <strong>{totalStudents}</strong>
+          </div>
+          <div className="stat-pill success">
+            <span>Present today</span>
+            <strong>{presentCount}</strong>
+            <small>{attendanceRate}% attendance</small>
+          </div>
+          <div className="stat-pill alert">
+            <span>Absent today</span>
+            <strong>{absentCount}</strong>
+            <small>{totalStudents > 0 ? totalStudents - presentCount : 0} unmarked</small>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderMark = () => (
+    <div className="mobile-dashboard">
+      <section className="card-block attendance-card">
+        <header className="card-header card-heading">
+          <div>
+            <span className="badge badge-accent">Taking attendance</span>
+            <h2>{student ? student.name : "No roster yet"}</h2>
+          </div>
+          <p>{student ? `Roll number ${student.roll_no}` : "Add students to start the roll call."}</p>
         </header>
 
-        <section className="attendance-grid grid-responsive two-columns" id="taking-attendance" style={{ scrollMarginTop: "140px" }}>
-          <article className="panel panel-primary">
-            <header className="panel-header">
-              <span className="badge badge-accent">Taking attendance</span>
-              <div>
-                <h2>{student ? student.name : "No roster yet"}</h2>
-                <p>
-                  {student
-                    ? `Roll number ${student.roll_no}`
-                    : "Add students to start the roll call."}
-                </p>
-              </div>
-            </header>
-
-            <div className="panel-body">
-              <div className="status-actions">
-                <button className="btn btn-success" onClick={() => markAttendance("Present")} disabled={!student}>
-                  Mark Present
-                </button>
-                <button className="btn btn-danger" onClick={() => markAttendance("Absent")} disabled={!student}>
-                  Mark Absent
-                </button>
-              </div>
-
-              <div className="progress-ticker">
-                <span className="ticker-label">Progress</span>
-                <strong>
-                  {student
-                    ? `Student ${currentStudentIndex + 1} of ${students.length}`
-                    : studentsLoading
-                    ? "Loading roster..."
-                    : "No students yet"}
-                </strong>
-              </div>
-            </div>
-
-            <footer className="panel-footer">
-              <button className="btn btn-primary" onClick={saveAttendance}>
-                Save today's attendance
-              </button>
-            </footer>
-          </article>
-
-          <article className="panel panel-secondary" id="absent-summary" style={{ scrollMarginTop: "140px" }}>
-            <header className="panel-header">
-              <span className="badge badge-danger">Absent summary</span>
-              <div>
-                <h2>Students marked absent</h2>
-                <p>Insights for {selectedDate}</p>
-              </div>
-            </header>
-
-            <div className="panel-body">
-              <table className="summary-table">
-                <thead>
-                  <tr>
-                    <th>Roll No</th>
-                    <th>Name</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!hasStudents ? (
-                    <tr>
-                      <td colSpan={3} className="empty-state">
-                        No students found. Add students to start tracking attendance.
-                      </td>
-                    </tr>
-                  ) : absentStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="empty-state">
-                        No absent students — your class is fully present!
-                      </td>
-                    </tr>
-                  ) : (
-                    absentStudents.map(s => (
-                      <tr key={s.id}>
-                        <td>{s.roll_no}</td>
-                        <td>{s.name}</td>
-                        <td>Absent</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-
-        <section className="roster-panel" id="manage-roster" style={{ scrollMarginTop: "140px" }}>
-          <div className="panel panel-tertiary">
-            <header className="panel-header">
-              <span className="badge badge-accent">Manage roster</span>
-              <div>
-                <h2>Keep your student list up to date</h2>
-                <p>Roll numbers are unique per teacher. Add or remove students at any time.</p>
-              </div>
-            </header>
-
-            <div className="panel-body roster-forms">
-              <form onSubmit={handleAddStudent} className="roster-form">
-                <label>Add a student</label>
-                <div className="roster-inputs">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Roll number"
-                    value={newStudentRoll}
-                    onChange={(e) => setNewStudentRoll(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Student name"
-                    value={newStudentName}
-                    onChange={(e) => setNewStudentName(e.target.value)}
-                  />
-                  <button type="submit" className="btn btn-secondary" disabled={studentSaving}>
-                    {studentSaving ? "Adding..." : "Add student"}
-                  </button>
-                </div>
-                {studentError && <p className="form-error">{studentError}</p>}
-              </form>
-
-              <div className="divider"></div>
-
-              <form onSubmit={handleDeleteStudent} className="roster-form danger">
-                <label>Remove a student</label>
-                <p>Enter the roll number to remove the student and all related attendance history.</p>
-                <div className="roster-inputs">
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Roll number"
-                    value={deleteRoll}
-                    onChange={(e) => setDeleteRoll(e.target.value)}
-                  />
-                  <button type="submit" className="btn btn-danger" disabled={deleteLoading}>
-                    {deleteLoading ? "Removing..." : "Delete student"}
-                  </button>
-                </div>
-                {deleteError && <p className="form-error">{deleteError}</p>}
-                {deleteMessage && <p className="form-success">{deleteMessage}</p>}
-              </form>
-            </div>
+        <div className="card-body attendance-controls">
+          <div className="meta-block">
+            <label htmlFor="attendance-date-mark">Attendance date</label>
+            <input
+              id="attendance-date-mark"
+              type="date"
+              value={selectedDate}
+              onChange={handleDateChange}
+            />
           </div>
-        </section>
-      </main>
+          <div className="status-buttons">
+            <button className="btn btn-success" onClick={() => markAttendance("Present")} disabled={!student}>
+              Mark Present
+            </button>
+            <button className="btn btn-danger" onClick={() => markAttendance("Absent")} disabled={!student}>
+              Mark Absent
+            </button>
+          </div>
+          <div className="progress-ticker">
+            <span className="ticker-label">Progress</span>
+            <strong>
+              {student
+                ? `Student ${currentStudentIndex + 1} of ${students.length}`
+                : studentsLoading
+                ? "Loading roster..."
+                : "No students yet"}
+            </strong>
+          </div>
+        </div>
+
+        <footer className="card-footer">
+          <button className="btn btn-primary" onClick={saveAttendance}>
+            Save today's attendance
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+
+  const renderSummary = () => (
+    <div className="mobile-dashboard">
+      <section className="card-block summary-card">
+        <header className="card-header">
+          <div>
+            <span className="badge badge-danger">Absent summary</span>
+            <h2>Students marked absent</h2>
+          </div>
+          <p>Insights for {selectedDate}</p>
+        </header>
+
+        <div className="card-body">
+          <div className="meta-block">
+            <label htmlFor="attendance-date-summary">Attendance date</label>
+            <input
+              id="attendance-date-summary"
+              type="date"
+              value={selectedDate}
+              onChange={handleDateChange}
+            />
+          </div>
+          <div className="table-scroll">
+            <table className="summary-table">
+              <thead>
+                <tr>
+                  <th>Roll No</th>
+                  <th>Name</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!hasStudents ? (
+                  <tr>
+                    <td colSpan={3} className="empty-state">
+                      No students found. Add students to start tracking attendance.
+                    </td>
+                  </tr>
+                ) : absentStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="empty-state">
+                      No absent students — your class is fully present!
+                    </td>
+                  </tr>
+                ) : (
+                  absentStudents.map(s => (
+                    <tr key={s.id}>
+                      <td>{s.roll_no}</td>
+                      <td>{s.name}</td>
+                      <td>Absent</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderRoster = () => (
+    <div className="mobile-dashboard">
+      <section className="card-block roster-card">
+        <header className="card-header">
+          <div>
+            <span className="badge badge-accent">Manage roster</span>
+            <h2>Keep your student list up to date</h2>
+          </div>
+          <p>Roll numbers are unique per teacher. Add or remove students at any time.</p>
+        </header>
+
+        <div className="card-body roster-body">
+          <form onSubmit={handleAddStudent} className="roster-form">
+            <label>Add a student</label>
+            <div className="roster-inputs">
+              <input
+                type="number"
+                min="1"
+                placeholder="Roll number"
+                value={newStudentRoll}
+                onChange={(e) => setNewStudentRoll(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Student name"
+                value={newStudentName}
+                onChange={(e) => setNewStudentName(e.target.value)}
+              />
+              <button type="submit" className="btn btn-secondary" disabled={studentSaving}>
+                {studentSaving ? "Adding..." : "Add student"}
+              </button>
+            </div>
+            {studentError && <p className="form-error">{studentError}</p>}
+          </form>
+
+          <div className="divider" />
+
+          <form onSubmit={handleDeleteStudent} className="roster-form danger">
+            <label>Remove a student</label>
+            <p className="form-note">Enter the roll number to delete the student and their attendance history.</p>
+            <div className="roster-inputs">
+              <input
+                type="number"
+                min="1"
+                placeholder="Roll number"
+                value={deleteRoll}
+                onChange={(e) => setDeleteRoll(e.target.value)}
+              />
+              <button type="submit" className="btn btn-danger" disabled={deleteLoading}>
+                {deleteLoading ? "Removing..." : "Delete student"}
+              </button>
+            </div>
+            {deleteError && <p className="form-error">{deleteError}</p>}
+            {deleteMessage && <p className="form-success">{deleteMessage}</p>}
+          </form>
+        </div>
+      </section>
+    </div>
+  );
+
+  const renderContent = () => {
+    switch (activeNav) {
+      case "mark":
+        return renderMark();
+      case "summary":
+        return renderSummary();
+      case "roster":
+        return renderRoster();
+      default:
+        return renderHome();
+    }
+  };
+
+  return (
+    <div className="attendance-shell">
+      <main className="page-shell">{renderContent()}</main>
+
+      <nav className="attendance-nav">
+        <div className="nav-links">
+          {NAV_ITEMS.map(item => (
+            <button
+              key={item.key}
+              type="button"
+              className={`nav-link-btn ${activeNav === item.key ? "is-active" : ""}`}
+              onClick={() => navigate(item.path)}
+            >
+              <span aria-hidden className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }
