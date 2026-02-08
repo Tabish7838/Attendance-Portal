@@ -16,6 +16,7 @@ import AbsencesScreen from "./src/screens/AbsencesScreen";
 import RosterScreen from "./src/screens/RosterScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 import { AuthStackParamList, RootTabParamList } from "./src/navigation/types";
+import SyncListener from "./src/offline/syncListener";
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -88,6 +89,7 @@ export default function App() {
   return (
     <AuthProvider>
       <StatusBar style="dark" />
+      <SyncListener />
       <AppNavigation />
     </AuthProvider>
   );

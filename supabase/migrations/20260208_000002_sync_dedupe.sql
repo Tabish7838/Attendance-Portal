@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS sync_dedupe (
+  op_id TEXT PRIMARY KEY,
+  teacher_id UUID NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

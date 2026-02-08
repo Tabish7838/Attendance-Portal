@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import AttendanceStats from "../components/AttendanceStats";
+import SyncStatusIndicator from "../components/SyncStatusIndicator";
 import { useAuth } from "../context/AuthContext";
 import { useAttendance } from "../context/AttendanceContext";
 import { buildApiUrl } from "../env";
@@ -73,6 +74,8 @@ const HomeScreen: React.FC = () => {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.dashboardTitle}>ATTENDANCE DASHBOARD</Text>
+
+      <SyncStatusIndicator />
 
       <AttendanceStats />
 

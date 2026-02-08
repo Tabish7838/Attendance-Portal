@@ -10,6 +10,17 @@ import {
 
 import { useAuth } from "./AuthContext";
 import { buildApiUrl } from "../env";
+import {
+  getAttendanceForDateLocal,
+  hydrateAttendanceFromServer,
+  hydrateStudentsFromServer,
+  listStudentsLocal,
+  upsertAttendanceLocal,
+  enqueueOp,
+  getStudentLocalByLocalId,
+  softDeleteAttendanceLocal,
+} from "../offline/repo";
+import { isOnline, syncNow } from "../offline/sync";
 
 export type AttendanceStatus = "Present" | "Absent";
 
@@ -99,7 +110,7 @@ type AttendanceProviderProps = {
 };
 
 export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
-  const { user, isLoading: authLoading, refreshSession } = useAuth();
+  const { user, isLoading: authLoading, refreshSession, accessToken } = useAuth();
   const teacherId = user?.id ?? null;
 
   const [selectedDate, setSelectedDateState] = useState(() => new Date());
@@ -129,45 +140,43 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
     setError(null);
 
     try {
-      const studentResponse = await fetch(
-        buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
-      );
+      const online = await isOnline();
 
-      if (!studentResponse.ok) {
-        const payload = await studentResponse.json().catch(() => ({}));
-        const failure = new Error(payload.message || "Failed to load students.");
-        // @ts-expect-error annotate status for messaging helpers
-        failure.status = studentResponse.status;
-        throw failure;
-      }
+      if (online) {
+        const studentResponse = await fetch(
+          buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
+        );
 
-      const roster: Student[] = await studentResponse.json();
-      const ordered = [...roster].sort((a, b) => a.roll_no - b.roll_no);
-      setStudents(ordered);
-
-      const attendanceResponse = await fetch(
-        buildApiUrl(`/attendance?teacher_id=${encodeURIComponent(teacherId)}&date=${isoDate}`)
-      );
-
-      let payload: { records?: Array<{ student_id: number; status: AttendanceStatus }> } = {
-        records: [],
-      };
-
-      if (!attendanceResponse.ok) {
-        if (attendanceResponse.status !== 404) {
-          const errorPayload = await attendanceResponse.json().catch(() => ({}));
-          const failure = new Error(errorPayload.message || "Failed to load attendance.");
-          // @ts-expect-error annotate status for messaging helpers
-          failure.status = attendanceResponse.status;
-          throw failure;
+        if (studentResponse.ok) {
+          const roster: Array<{ id: number; roll_no: number; name: string }> =
+            await studentResponse.json();
+          await hydrateStudentsFromServer({ teacherId, students: roster || [] });
         }
-      } else {
-        payload = await attendanceResponse.json();
+
+        const attendanceResponse = await fetch(
+          buildApiUrl(`/attendance?teacher_id=${encodeURIComponent(teacherId)}&date=${isoDate}`)
+        );
+
+        if (attendanceResponse.ok) {
+          const payload: { records?: Array<{ student_id: number; status: AttendanceStatus }> } =
+            await attendanceResponse.json();
+          await hydrateAttendanceFromServer({
+            teacherId,
+            isoDate,
+            records: (payload.records || []) as Array<{ student_id: number; status: AttendanceStatus }>,
+          });
+        }
       }
 
+      const localStudents = await listStudentsLocal(teacherId);
+      setStudents(
+        localStudents.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name }))
+      );
+
+      const localAttendance = await getAttendanceForDateLocal({ teacherId, isoDate });
       const nextRecords: Record<number, AttendanceStatus> = {};
-      (payload.records || []).forEach((record) => {
-        nextRecords[record.student_id] = record.status;
+      localAttendance.forEach((row) => {
+        nextRecords[row.student_local_id] = row.status;
       });
       setRecords(nextRecords);
     } catch (err: any) {
@@ -243,39 +252,71 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
 
       const sourceRecords = recordsOverride ?? records;
 
-      const recordsArray = Object.entries(sourceRecords)
-        .filter(([, status]) => !!status)
-        .map(([studentId, status]) => ({
-          student_id: Number(studentId),
-          status: status as AttendanceStatus,
-        }));
-
       try {
-        const response = await fetch(buildApiUrl("/attendance"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            teacher_id: teacherId,
-            date: isoDate,
-            records: recordsArray,
-          }),
-        });
+        const clientUpdatedAt = new Date().toISOString();
 
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          const failure = new Error(payload.message || "Failed to save attendance.");
-          // @ts-expect-error annotate status for messaging helpers
-          failure.status = response.status;
-          throw failure;
+        for (const student of students) {
+          const status = sourceRecords[student.id];
+          const studentRow = await getStudentLocalByLocalId({ teacherId, localId: student.id });
+          const studentServerId = studentRow?.server_id ?? null;
+
+          if (status) {
+            const localRow = await upsertAttendanceLocal({
+              teacherId,
+              isoDate,
+              status,
+              studentLocalId: student.id,
+              studentServerId: studentServerId ? Number(studentServerId) : null,
+              clientUpdatedAt,
+            });
+
+            await enqueueOp({
+              entity: "attendance",
+              recordId: String(localRow.local_id),
+              opType: localRow.server_id ? "update" : "create",
+              payload: {
+                student_local_id: student.id,
+                student_id: studentServerId ? Number(studentServerId) : undefined,
+                date: isoDate,
+                status,
+              },
+              clientUpdatedAt,
+            });
+          } else {
+            await softDeleteAttendanceLocal({
+              teacherId,
+              isoDate,
+              studentLocalId: student.id,
+              clientUpdatedAt,
+            });
+
+            await enqueueOp({
+              entity: "attendance",
+              recordId: String(student.id),
+              opType: "delete",
+              payload: {
+                student_local_id: student.id,
+                student_id: studentServerId ? Number(studentServerId) : undefined,
+                date: isoDate,
+              },
+              clientUpdatedAt,
+            });
+          }
         }
 
+        const online = await isOnline();
+        if (online && accessToken) {
+          await syncNow({ accessToken, teacherId });
+        }
+
+        await loadData();
         return { success: true };
       } catch (err: any) {
         const friendly = getFriendlyAttendanceError("save", err);
         return { success: false, error: friendly };
       }
     },
-    [records, teacherId, isoDate]
+    [records, teacherId, isoDate, students, loadData, accessToken]
   );
 
   const value = useMemo<AttendanceContextValue>(

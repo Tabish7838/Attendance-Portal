@@ -17,6 +17,15 @@ import {
 
 import { useAuth } from "../context/AuthContext";
 import { useAttendance } from "../context/AttendanceContext";
+import {
+  enqueueOp,
+  getStudentLocalByRollNo,
+  hydrateStudentsFromServer,
+  listStudentsLocal,
+  softDeleteStudentLocal,
+  upsertStudentLocal,
+} from "../offline/repo";
+import { isOnline, syncNow } from "../offline/sync";
 import { buildApiUrl } from "../env";
 
 type Student = {
@@ -38,7 +47,7 @@ const friendlyError = (fallback: string, error: any): string => {
 };
 
 const RosterScreen: React.FC = () => {
-  const { user, isLoading: authLoading, refreshSession } = useAuth();
+  const { user, isLoading: authLoading, refreshSession, accessToken } = useAuth();
   const { refresh } = useAttendance();
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -69,20 +78,22 @@ const RosterScreen: React.FC = () => {
     setError(null);
 
     try {
-      const response = await fetch(
-        buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
-      );
+      const online = await isOnline();
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const failure = new Error(payload.message || "Failed to load students.");
-        // @ts-expect-error augment status for friendly error messaging
-        failure.status = response.status;
-        throw failure;
+      if (online) {
+        const response = await fetch(
+          buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
+        );
+
+        if (response.ok) {
+          const serverStudents: Array<{ id: number; roll_no: number; name: string }> =
+            await response.json();
+          await hydrateStudentsFromServer({ teacherId, students: serverStudents || [] });
+        }
       }
 
-      const data: Student[] = await response.json();
-      setStudents(data);
+      const local = await listStudentsLocal(teacherId);
+      setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
     } catch (err: any) {
       setStudents([]);
       setError(friendlyError("We couldn’t load your roster. Please try again.", err));
@@ -130,43 +141,40 @@ const RosterScreen: React.FC = () => {
 
     setAdding(true);
 
-    const tempId = Date.now() * -1;
-    const optimisticStudent: Student = {
-      id: tempId,
-      roll_no: rollNumber,
-      name: trimmedName,
-    };
-    setStudents((prev) => [...prev, optimisticStudent]);
-
     try {
-      const response = await fetch(buildApiUrl("/students"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          teacher_id: teacherId,
-          roll_no: rollNumber,
-          name: trimmedName,
-        }),
+      const clientUpdatedAt = new Date().toISOString();
+      const created = await upsertStudentLocal({
+        teacherId,
+        rollNo: rollNumber,
+        name: trimmedName,
+        clientUpdatedAt,
       });
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const failure = new Error(payload.message || "Failed to add student.");
-        throw failure;
+      await enqueueOp({
+        entity: "student",
+        recordId: String(created.local_id),
+        opType: created.server_id ? "update" : "create",
+        payload: {
+          id: created.server_id ?? undefined,
+          roll_no: created.roll_no,
+          name: created.name,
+        },
+        clientUpdatedAt,
+      });
+
+      const local = await listStudentsLocal(teacherId);
+      setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
+
+      const online = await isOnline();
+      if (online && accessToken) {
+        await syncNow({ accessToken, teacherId });
+        await refresh();
       }
 
-      const created: Student = await response.json();
-      setStudents((prev) =>
-        prev
-          .map((student) => (student.id === tempId ? created : student))
-          .sort((a, b) => a.roll_no - b.roll_no)
-      );
-      await refresh();
       setRollInput("");
       setNameInput("");
       Keyboard.dismiss();
     } catch (err: any) {
-      setStudents((prev) => prev.filter((student) => student.id !== tempId));
       setAddError(friendlyError("Unable to add student. Please try again.", err));
     } finally {
       setAdding(false);
@@ -191,29 +199,37 @@ const RosterScreen: React.FC = () => {
       return;
     }
 
-    const target = students.find((student) => student.roll_no === rollNumber);
-    if (!target) {
-      setDeleteError("No student with that roll number in your roster.");
-      return;
-    }
-
     setDeleting(true);
 
     try {
-      const url = new URL(buildApiUrl("/students"));
-      url.searchParams.set("teacher_id", teacherId);
-      url.searchParams.set("roll_no", rollNumber.toString());
-
-      const response = await fetch(url.toString(), { method: "DELETE" });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const failure = new Error(payload.message || "Failed to delete student.");
-        throw failure;
+      const target = await getStudentLocalByRollNo({ teacherId, rollNo: rollNumber });
+      if (!target || target.is_deleted) {
+        setDeleteError("No student with that roll number in your roster.");
+        return;
       }
 
-      setStudents((prev) => prev.filter((student) => student.id !== target.id));
-      await refresh();
+      const clientUpdatedAt = new Date().toISOString();
+      await softDeleteStudentLocal({ teacherId, localId: target.local_id, clientUpdatedAt });
+      await enqueueOp({
+        entity: "student",
+        recordId: String(target.local_id),
+        opType: "delete",
+        payload: {
+          id: target.server_id ?? undefined,
+          roll_no: target.roll_no,
+        },
+        clientUpdatedAt,
+      });
+
+      const local = await listStudentsLocal(teacherId);
+      setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
+
+      const online = await isOnline();
+      if (online && accessToken) {
+        await syncNow({ accessToken, teacherId });
+        await refresh();
+      }
+
       setDeleteRoll("");
       setDeleteMessage(`Removed ${target.name} (Roll ${target.roll_no}).`);
     } catch (err: any) {
