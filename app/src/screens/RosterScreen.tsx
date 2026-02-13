@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +16,9 @@ import {
 
 import { useAuth } from "../context/AuthContext";
 import { useAttendance } from "../context/AttendanceContext";
+import { useBranch } from "../context/BranchContext";
+import SyncStatusIndicator from "../components/SyncStatusIndicator";
+import { AppShell, Button, Card } from "../components/ui";
 import {
   enqueueOp,
   getStudentLocalByRollNo,
@@ -27,6 +29,7 @@ import {
 } from "../offline/repo";
 import { isOnline, syncNow } from "../offline/sync";
 import { buildApiUrl } from "../env";
+import { theme } from "../theme";
 
 type Student = {
   id: number;
@@ -49,6 +52,7 @@ const friendlyError = (fallback: string, error: any): string => {
 const RosterScreen: React.FC = () => {
   const { user, isLoading: authLoading, refreshSession, accessToken } = useAuth();
   const { refresh } = useAttendance();
+  const { selectedBranchLocalId, selectedBranch } = useBranch();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,25 +78,51 @@ const RosterScreen: React.FC = () => {
   const loadStudents = useCallback(async () => {
     if (!teacherId) return;
 
+    if (!selectedBranchLocalId) {
+      setStudents([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const branchName = selectedBranch?.name ?? null;
+    if (!branchName) {
+      setStudents([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       const online = await isOnline();
 
-      if (online) {
+      if (online && accessToken) {
         const response = await fetch(
-          buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
+          buildApiUrl(
+            `/students?teacher_id=${encodeURIComponent(teacherId)}&branch_name=${encodeURIComponent(branchName)}`
+          ),
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
         );
 
         if (response.ok) {
           const serverStudents: Array<{ id: number; roll_no: number; name: string }> =
             await response.json();
-          await hydrateStudentsFromServer({ teacherId, students: serverStudents || [] });
+          await hydrateStudentsFromServer({
+            teacherId,
+            branchLocalId: selectedBranchLocalId,
+            students: serverStudents || [],
+          });
         }
       }
 
-      const local = await listStudentsLocal(teacherId);
+      const local = await listStudentsLocal(teacherId, selectedBranchLocalId);
       setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
     } catch (err: any) {
       setStudents([]);
@@ -107,7 +137,7 @@ const RosterScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [teacherId, refreshSession]);
+  }, [teacherId, refreshSession, selectedBranchLocalId, selectedBranch?.name]);
 
   useEffect(() => {
     if (!teacherId) {
@@ -118,10 +148,13 @@ const RosterScreen: React.FC = () => {
     }
 
     loadStudents();
-  }, [teacherId, loadStudents]);
+  }, [teacherId, selectedBranchLocalId, loadStudents]);
 
   const handleAdd = async () => {
-    if (!teacherId || adding) return;
+    if (!teacherId || !selectedBranchLocalId || adding) return;
+
+    const branchName = selectedBranch?.name ?? null;
+    if (!branchName) return;
 
     const trimmedName = nameInput.trim();
     const trimmedRoll = rollInput.trim();
@@ -145,6 +178,7 @@ const RosterScreen: React.FC = () => {
       const clientUpdatedAt = new Date().toISOString();
       const created = await upsertStudentLocal({
         teacherId,
+        branchLocalId: selectedBranchLocalId,
         rollNo: rollNumber,
         name: trimmedName,
         clientUpdatedAt,
@@ -158,11 +192,12 @@ const RosterScreen: React.FC = () => {
           id: created.server_id ?? undefined,
           roll_no: created.roll_no,
           name: created.name,
+          branch_name: branchName,
         },
         clientUpdatedAt,
       });
 
-      const local = await listStudentsLocal(teacherId);
+      const local = await listStudentsLocal(teacherId, selectedBranchLocalId);
       setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
 
       const online = await isOnline();
@@ -182,7 +217,10 @@ const RosterScreen: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!teacherId || deleting) return;
+    if (!teacherId || !selectedBranchLocalId || deleting) return;
+
+    const branchName = selectedBranch?.name ?? null;
+    if (!branchName) return;
 
     const trimmed = deleteRoll.trim();
     setDeleteError(null);
@@ -202,7 +240,11 @@ const RosterScreen: React.FC = () => {
     setDeleting(true);
 
     try {
-      const target = await getStudentLocalByRollNo({ teacherId, rollNo: rollNumber });
+      const target = await getStudentLocalByRollNo({
+        teacherId,
+        branchLocalId: selectedBranchLocalId,
+        rollNo: rollNumber,
+      });
       if (!target || target.is_deleted) {
         setDeleteError("No student with that roll number in your roster.");
         return;
@@ -217,11 +259,12 @@ const RosterScreen: React.FC = () => {
         payload: {
           id: target.server_id ?? undefined,
           roll_no: target.roll_no,
+          branch_name: branchName,
         },
         clientUpdatedAt,
       });
 
-      const local = await listStudentsLocal(teacherId);
+      const local = await listStudentsLocal(teacherId, selectedBranchLocalId);
       setStudents(local.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name })));
 
       const online = await isOnline();
@@ -268,42 +311,12 @@ const RosterScreen: React.FC = () => {
       keyboardVerticalOffset={Platform.OS === "ios" ? 96 : 0}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <ScrollView
-          style={styles.scrollContainer}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+        <AppShell>
+          <SyncStatusIndicator />
+
           {rosterHeader}
 
-          {authLoading || loading ? (
-            <View style={styles.loaderRow}>
-              <ActivityIndicator size="large" color="#1d4ed8" />
-            </View>
-          ) : error ? (
-            <View style={styles.feedbackCard}>
-              <Text style={styles.feedbackText}>{error}</Text>
-              <Pressable style={styles.retryButton} onPress={loadStudents}>
-                <Text style={styles.retryText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.listCard}>
-              <Text style={styles.listTitle}>Current roster</Text>
-              {sortedStudents.length === 0 ? (
-                <Text style={styles.emptyState}>No students yet. Add your first student below.</Text>
-              ) : (
-                <FlatList
-                  data={sortedStudents}
-                  keyExtractor={(item) => String(item.id)}
-                  renderItem={renderStudent}
-                  scrollEnabled={false}
-                  ItemSeparatorComponent={() => <View style={styles.separator} />}
-                />
-              )}
-            </View>
-          )}
-
-          <View style={styles.formCard}>
+          <Card style={styles.formCard}>
             <Text style={styles.formTitle}>Add a student</Text>
             <View style={styles.inputRow}>
               <View style={styles.inputWrapper}>
@@ -315,6 +328,8 @@ const RosterScreen: React.FC = () => {
                   keyboardType="number-pad"
                   style={styles.input}
                   returnKeyType="next"
+                  placeholderTextColor={theme.colors.muted}
+                  accessibilityLabel="Roll number"
                 />
               </View>
               <View style={styles.inputWrapperWide}>
@@ -326,24 +341,16 @@ const RosterScreen: React.FC = () => {
                   autoCapitalize="words"
                   style={styles.input}
                   returnKeyType="done"
+                  placeholderTextColor={theme.colors.muted}
+                  accessibilityLabel="Student name"
                 />
               </View>
             </View>
             {addError ? <Text style={styles.errorText}>{addError}</Text> : null}
-            <Pressable
-              onPress={handleAdd}
-              style={[styles.primaryButton, (adding || authLoading) && styles.buttonDisabled]}
-              disabled={adding || authLoading}
-            >
-              {adding ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Add student</Text>
-              )}
-            </Pressable>
-          </View>
+            <Button label="Add student" onPress={handleAdd} loading={adding} disabled={authLoading} />
+          </Card>
 
-          <View style={styles.formCardDanger}>
+          <Card style={styles.formCardDanger}>
             <Text style={styles.formTitle}>Remove a student</Text>
             <Text style={styles.formHint}>
               Enter the roll number to delete the student and their attendance history.
@@ -358,24 +365,57 @@ const RosterScreen: React.FC = () => {
                   keyboardType="number-pad"
                   style={styles.input}
                   returnKeyType="done"
+                  placeholderTextColor={theme.colors.muted}
+                  accessibilityLabel="Roll number to delete"
                 />
               </View>
             </View>
             {deleteError ? <Text style={styles.errorText}>{deleteError}</Text> : null}
             {deleteMessage ? <Text style={styles.successText}>{deleteMessage}</Text> : null}
-            <Pressable
+            <Button
+              label="Delete student"
               onPress={handleDelete}
-              style={[styles.dangerButton, (deleting || authLoading) && styles.buttonDisabled]}
-              disabled={deleting || authLoading}
-            >
-              {deleting ? (
-                <ActivityIndicator color="#ffffff" />
+              loading={deleting}
+              disabled={authLoading}
+              variant="danger"
+            />
+          </Card>
+
+          {authLoading || loading ? (
+            <View style={styles.loaderRow}>
+              <ActivityIndicator size="large" color={theme.colors.text} />
+            </View>
+          ) : error ? (
+            <Card style={styles.feedbackCard}>
+              <Text style={styles.feedbackText}>{error}</Text>
+              <Button
+                label="Try again"
+                onPress={loadStudents}
+                variant="secondary"
+                style={styles.inlineButton}
+              />
+            </Card>
+          ) : (
+            <Card style={styles.listCard}>
+              <Text style={styles.listTitle}>Current roster</Text>
+              {sortedStudents.length === 0 ? (
+                <Text style={styles.emptyState}>No students yet. Add your first student above.</Text>
               ) : (
-                <Text style={styles.dangerButtonText}>Delete student</Text>
+                <FlatList
+                  data={sortedStudents}
+                  keyExtractor={(item) => String(item.id)}
+                  renderItem={renderStudent}
+                  scrollEnabled={false}
+                  initialNumToRender={24}
+                  maxToRenderPerBatch={24}
+                  updateCellsBatchingPeriod={50}
+                  windowSize={5}
+                  ItemSeparatorComponent={() => <View style={styles.separator} />}
+                />
               )}
-            </Pressable>
-          </View>
-        </ScrollView>
+            </Card>
+          )}
+        </AppShell>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
@@ -386,36 +426,28 @@ export default RosterScreen;
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#ffffff",
-  },
-  scrollContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 160,
+    backgroundColor: theme.colors.bg,
   },
   headerBlock: {
-    marginBottom: 32,
+    marginBottom: theme.spacing.xl,
   },
   sectionLabel: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2563eb",
-    marginBottom: 8,
+    color: theme.colors.muted,
+    marginBottom: theme.spacing.sm,
     textTransform: "uppercase",
     letterSpacing: 1,
   },
   screenTitle: {
     fontSize: 26,
     fontWeight: "700",
-    color: "#0f172a",
-    marginBottom: 8,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
   },
   screenSubhead: {
     fontSize: 15,
-    color: "#475569",
+    color: theme.colors.text2,
   },
   loaderRow: {
     alignItems: "center",
@@ -423,43 +455,28 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   feedbackCard: {
-    backgroundColor: "#f8fafc",
-    padding: 20,
-    borderRadius: 16,
-    marginBottom: 28,
+    marginBottom: theme.spacing.lg,
   },
   feedbackText: {
     fontSize: 15,
-    color: "#0f172a",
-    marginBottom: 12,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
   },
-  retryButton: {
+  inlineButton: {
     alignSelf: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#2563eb",
-  },
-  retryText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
   },
   listCard: {
-    backgroundColor: "#f1f5f9",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 28,
+    marginBottom: theme.spacing.lg,
   },
   listTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#0f172a",
-    marginBottom: 16,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.lg,
   },
   emptyState: {
     fontSize: 15,
-    color: "#475569",
+    color: theme.colors.text2,
   },
   studentRow: {
     flexDirection: "row",
@@ -470,7 +487,7 @@ const styles = StyleSheet.create({
     height: 44,
     width: 44,
     borderRadius: 22,
-    backgroundColor: "#2563eb10",
+    backgroundColor: theme.colors.surface2,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 16,
@@ -478,7 +495,7 @@ const styles = StyleSheet.create({
   studentInitial: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
   },
   studentMeta: {
     flex: 1,
@@ -486,42 +503,34 @@ const styles = StyleSheet.create({
   studentName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   studentRoll: {
     fontSize: 14,
-    color: "#475569",
+    color: theme.colors.muted,
     marginTop: 2,
   },
   separator: {
     height: 1,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: theme.colors.divider,
   },
   formCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 24,
+    marginBottom: theme.spacing.lg,
   },
   formCardDanger: {
-    backgroundColor: "#fef2f2",
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: theme.colors.border,
+    marginBottom: theme.spacing.lg,
   },
   formTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#0f172a",
-    marginBottom: 16,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.lg,
   },
   formHint: {
     fontSize: 14,
-    color: "#b91c1c",
-    marginBottom: 16,
+    color: theme.colors.text2,
+    marginBottom: theme.spacing.lg,
   },
   inputRow: {
     flexDirection: "row",
@@ -537,62 +546,28 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#475569",
-    marginBottom: 6,
+    color: theme.colors.muted,
+    marginBottom: theme.spacing.sm,
   },
   input: {
     height: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d9e2ec",
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
     fontSize: 16,
-    backgroundColor: "#f9fbfd",
-    color: "#0f172a",
+    backgroundColor: theme.colors.surface,
+    color: theme.colors.text,
   },
   errorText: {
     fontSize: 13,
-    color: "#b91c1c",
-    marginBottom: 12,
+    color: theme.colors.danger,
+    marginBottom: theme.spacing.sm,
   },
   successText: {
     fontSize: 13,
-    color: "#0f766e",
-    marginBottom: 12,
-  },
-  primaryButton: {
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#2563eb",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-  primaryButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  dangerButton: {
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#dc2626",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#b91c1c",
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-  dangerButtonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
   },
   buttonDisabled: {
     opacity: 0.6,

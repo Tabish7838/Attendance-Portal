@@ -3,6 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 
 import { formatDateForDisplay, useAttendance } from "../context/AttendanceContext";
+import { theme } from "../theme";
 
 const AttendanceStatsCard: React.FC = () => {
   const { selectedDate, setSelectedDate, counts } = useAttendance();
@@ -98,23 +99,23 @@ export default memo(AttendanceStatsCard);
 
 const styles = StyleSheet.create({
   wrapper: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: "#0f172a",
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.card,
+    padding: theme.spacing.lg,
+    shadowColor: theme.colors.text,
     shadowOpacity: 0.06,
     shadowOffset: { width: 0, height: 10 },
     shadowRadius: 20,
     elevation: 4,
-    marginBottom: 24,
+    marginBottom: theme.spacing.xl,
   },
   headerRow: {
-    marginBottom: 16,
+    marginBottom: theme.spacing.md,
   },
   label: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text2,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 6,
@@ -126,77 +127,69 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   dateText: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   changeText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
   },
   cardsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    justifyContent: "space-between",
   },
   dashboardCard: {
     borderRadius: 18,
-    padding: 16,
-    minHeight: 116,
+    padding: theme.spacing.md,
+    minHeight: 92,
     justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    width: "48%",
+    marginBottom: theme.spacing.sm,
   },
   totalCard: {
-    flexBasis: "48%",
-    backgroundColor: "#dbeafe",
-    borderColor: "#bfdbfe",
-    borderWidth: 1,
+    backgroundColor: theme.colors.surface2,
   },
   presentCard: {
-    flexBasis: "48%",
-    backgroundColor: "#d1fae5",
-    borderColor: "#a7f3d0",
-    borderWidth: 1,
+    backgroundColor: theme.colors.surface2,
   },
   absentCard: {
-    flexBasis: "48%",
-    backgroundColor: "#fee2e2",
-    borderColor: "#fecaca",
-    borderWidth: 1,
+    backgroundColor: theme.colors.surface2,
   },
   unmarkedCard: {
-    flexBasis: "48%",
-    backgroundColor: "#fef3c7",
-    borderColor: "#fde68a",
-    borderWidth: 1,
+    backgroundColor: theme.colors.surface2,
   },
   cardTitle: {
     fontSize: 12,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    color: "#64748b",
+    color: theme.colors.muted,
   },
   cardValue: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "800",
     marginTop: 6,
   },
   totalValue: {
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   presentValue: {
-    color: "#16a34a",
+    color: theme.colors.success,
   },
   absentValue: {
-    color: "#dc2626",
+    color: theme.colors.danger,
   },
   unmarkedValue: {
-    color: "#b45309",
+    color: theme.colors.warning,
   },
   cardFooter: {
-    fontSize: 13,
-    color: "#475569",
-    marginTop: 8,
+    fontSize: 12,
+    color: theme.colors.text2,
+    marginTop: theme.spacing.sm,
   },
 });

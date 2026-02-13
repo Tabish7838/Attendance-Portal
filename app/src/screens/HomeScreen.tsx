@@ -1,25 +1,40 @@
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
   Linking,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  Pressable,
   View,
 } from "react-native";
 
 import AttendanceStats from "../components/AttendanceStats";
 import SyncStatusIndicator from "../components/SyncStatusIndicator";
+import { AppShell, Card, Button } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { useAttendance } from "../context/AttendanceContext";
+import { useBranch } from "../context/BranchContext";
 import { buildApiUrl } from "../env";
+import { theme } from "../theme";
 
 const HomeScreen: React.FC = () => {
   const { user, signOut } = useAuth();
-  const { students, records, loading: attendanceLoading, error, refresh } = useAttendance();
+  const { refresh } = useAttendance();
+  const {
+    branches,
+    selectedBranch,
+    selectedBranchLocalId,
+    setSelectedBranchLocalId,
+    createBranch,
+    loading: branchesLoading,
+    error: branchesError,
+  } = useBranch();
+
+  const [newBranchName, setNewBranchName] = useState("");
+  const [creatingBranch, setCreatingBranch] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -39,237 +54,245 @@ const HomeScreen: React.FC = () => {
     await Linking.openURL(url);
   };
 
-  const renderRosterRow = useCallback(
-    ({ item }: { item: typeof students[number] }) => {
-      const status = records[item.id];
-      return (
-        <View style={styles.rosterRow}>
-          <View style={styles.studentCircle}>
-            <Text style={styles.studentInitial}>{item.name.charAt(0).toUpperCase()}</Text>
-          </View>
-          <View style={styles.studentMeta}>
-            <Text style={styles.studentName}>{item.name}</Text>
-            <Text style={styles.studentRoll}>Roll {item.roll_no}</Text>
-          </View>
-          <View
-            style={[
-              styles.statusPill,
-              status === "Present"
-                ? styles.presentPill
-                : status === "Absent"
-                ? styles.absentPill
-                : styles.unmarkedPill,
-            ]}
-          >
-            <Text style={styles.statusPillText}>
-              {status === "Present" ? "Present" : status === "Absent" ? "Absent" : "Unmarked"}
-            </Text>
-          </View>
-        </View>
-      );
-    },
-    [records, students]
-  );
+  const branchLabel = useMemo(() => {
+    if (branchesLoading) return "Loading...";
+    if (selectedBranch) return selectedBranch.name;
+    if (branches.length === 0) return "Create a branch";
+    return "Select a branch";
+  }, [branchesLoading, branches.length, selectedBranch]);
+
+  const handleCreateBranch = useCallback(async () => {
+    if (creatingBranch) return;
+    setCreatingBranch(true);
+    setCreateError(null);
+
+    const result = await createBranch(newBranchName);
+    if (!result.success) {
+      setCreateError(result.error ?? "Unable to create branch.");
+    } else {
+      setNewBranchName("");
+    }
+
+    setCreatingBranch(false);
+  }, [createBranch, creatingBranch, newBranchName]);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <AppShell>
       <Text style={styles.dashboardTitle}>ATTENDANCE DASHBOARD</Text>
 
       <SyncStatusIndicator />
 
+      <Card style={styles.branchCard}>
+        <Text style={styles.sectionLabel}>Branch</Text>
+        <Pressable
+          onPress={() => setBranchMenuOpen((prev) => !prev)}
+          style={({ pressed }) => [styles.branchDropdown, pressed && styles.branchDropdownPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`Change branch. Current branch ${branchLabel}`}
+        >
+          <Text style={styles.branchName}>{branchLabel}</Text>
+          <Text style={styles.branchChevron}>{branchMenuOpen ? "▲" : "▼"}</Text>
+        </Pressable>
+
+        {branchesError ? <Text style={styles.errorText}>{branchesError}</Text> : null}
+
+        {branchMenuOpen && branches.length > 0 ? (
+          <View style={styles.branchMenu}>
+            {branches.map((b) => {
+              const active = b.local_id === selectedBranchLocalId;
+              return (
+                <Pressable
+                  key={b.local_id}
+                  onPress={async () => {
+                    await setSelectedBranchLocalId(b.local_id);
+                    setBranchMenuOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.branchMenuItem,
+                    active && styles.branchMenuItemActive,
+                    pressed && styles.branchMenuItemPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Switch to branch ${b.name}`}
+                >
+                  <Text style={[styles.branchMenuItemText, active && styles.branchMenuItemTextActive]}>
+                    {b.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {branches.length === 0 && !branchesLoading ? (
+          <Text style={styles.branchEmptyState}>
+            Create your first branch (class/section) to start adding students and taking attendance.
+          </Text>
+        ) : null}
+
+        <View style={styles.newBranchRow}>
+          <TextInput
+            value={newBranchName}
+            onChangeText={setNewBranchName}
+            placeholder="New branch name"
+            placeholderTextColor={theme.colors.muted}
+            style={styles.branchInput}
+            accessibilityLabel="New branch name"
+          />
+          <Button
+            label="Add"
+            onPress={handleCreateBranch}
+            loading={creatingBranch}
+            disabled={!newBranchName.trim()}
+            style={styles.branchAddButton}
+          />
+        </View>
+        {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+      </Card>
+
       <AttendanceStats />
 
-      <View style={styles.dashboardCard}>
+      <Card style={styles.dashboardCard}>
         <Text style={styles.sectionLabel}>Logged in as</Text>
         <View style={styles.loggedInBox}>
           <Text style={styles.loggedInName}>{displayName}</Text>
           <Text style={styles.loggedInEmail}>{user?.email ?? ""}</Text>
         </View>
 
-        <Pressable style={styles.secondaryButton} onPress={handleExport}>
-          <Text style={styles.secondaryButtonText}>Export full history</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={signOut}
-        >
-          <Text style={styles.secondaryButtonText}>Logout</Text>
-        </Pressable>
-      </View>
-
-      <View style={[styles.dashboardCard, styles.rosterCard]}>
-        <Text style={styles.rosterTitle}>ROSTER STATUS</Text>
-
-        {error ? <Text style={styles.rosterErrorText}>{error}</Text> : null}
-
-        {attendanceLoading ? (
-          <View style={styles.loaderRow}>
-            <ActivityIndicator size="large" color="#1d4ed8" />
-          </View>
-        ) : students.length === 0 ? (
-          <Text style={styles.emptyState}>No students available yet. Add students in the roster tab.</Text>
-        ) : (
-          <FlatList
-            data={students}
-            keyExtractor={(item) => String(item.id)}
-            renderItem={renderRosterRow}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-          />
-        )}
-      </View>
-    </ScrollView>
+        <Button label="Export full history" variant="secondary" onPress={handleExport} style={styles.actionButton} />
+        <Button label="Logout" variant="secondary" onPress={signOut} style={styles.actionButton} />
+      </Card>
+    </AppShell>
   );
 };
 
 export default HomeScreen;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f1f5f9",
-  },
-  content: {
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 120,
-  },
   dashboardTitle: {
     fontSize: 22,
     fontWeight: "800",
     letterSpacing: 1,
-    color: "#1e293b",
-    marginBottom: 16,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.lg,
+  },
+  branchCard: {
+    padding: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
   },
   dashboardCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 10 },
-    shadowRadius: 20,
-    elevation: 4,
-  },
-  rosterCard: {
-    marginTop: 20,
+    padding: theme.spacing.xl,
   },
   sectionLabel: {
     fontSize: 12,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    color: "#94a3b8",
-    marginBottom: 10,
+    color: theme.colors.muted,
+    marginBottom: theme.spacing.sm,
+  },
+  branchName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: theme.colors.text,
+  },
+  branchDropdown: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: theme.spacing.sm,
+  },
+  branchDropdownPressed: {
+    opacity: 0.85,
+  },
+  branchChevron: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.muted,
+    marginLeft: 10,
+  },
+  branchMenu: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 14,
+    overflow: "hidden",
+    marginBottom: theme.spacing.md,
+  },
+  branchMenuItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.divider,
+  },
+  branchMenuItemActive: {
+    backgroundColor: theme.colors.surface2,
+  },
+  branchMenuItemPressed: {
+    opacity: 0.85,
+  },
+  branchMenuItemText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: theme.colors.text2,
+  },
+  branchMenuItemTextActive: {
+    color: theme.colors.text,
+  },
+  branchEmptyState: {
+    fontSize: 14,
+    color: theme.colors.text2,
+    marginBottom: theme.spacing.md,
+  },
+  newBranchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  branchInput: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingHorizontal: 14,
+    fontSize: 15,
+    backgroundColor: theme.colors.surface,
+    color: theme.colors.text,
+  },
+  branchAddButton: {
+    height: 44,
+    paddingHorizontal: 14,
+    marginLeft: 10,
+  },
+  errorText: {
+    fontSize: 13,
+    color: theme.colors.danger,
+    marginBottom: theme.spacing.sm,
   },
   loggedInBox: {
-    backgroundColor: "#e2e8f0",
+    backgroundColor: theme.colors.surface2,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 16,
+    marginBottom: theme.spacing.lg,
   },
   loggedInName: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
     marginBottom: 4,
   },
   loggedInEmail: {
     fontSize: 14,
-    color: "#475569",
+    color: theme.colors.text2,
   },
-  secondaryButton: {
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 12,
-    backgroundColor: "#ffffff",
-  },
-  secondaryButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#2563eb",
-  },
-  rosterTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#2563eb",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  loaderRow: {
-    paddingVertical: 40,
-    alignItems: "center",
-  },
-  rosterErrorText: {
-    fontSize: 14,
-    color: "#dc2626",
-    marginBottom: 10,
-  },
-  emptyState: {
-    fontSize: 15,
-    color: "#475569",
-    marginTop: 8,
-  },
-  rosterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  studentCircle: {
-    height: 46,
-    width: 46,
-    borderRadius: 23,
-    backgroundColor: "#2563eb15",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 14,
-  },
-  studentInitial: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#2563eb",
-  },
-  studentMeta: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#0f172a",
-  },
-  studentRoll: {
-    fontSize: 14,
-    color: "#64748b",
-    marginTop: 2,
-  },
-  statusPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  statusPillText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#0f172a",
-  },
-  presentPill: {
-    backgroundColor: "#bbf7d0",
-  },
-  absentPill: {
-    backgroundColor: "#fecaca",
-  },
-  unmarkedPill: {
-    backgroundColor: "#e2e8f0",
-  },
-  separator: {
-    height: 1,
-    backgroundColor: "#e2e8f0",
+  actionButton: {
+    marginTop: theme.spacing.md,
   },
 });

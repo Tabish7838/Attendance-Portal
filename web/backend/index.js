@@ -80,6 +80,38 @@ const createApp = (deps) => {
     return incoming.getTime() > server.getTime();
   };
 
+  const normalizeBranchName = (value) => {
+    const name = typeof value === "string" ? value.trim() : "";
+    return name;
+  };
+
+  const getOrCreateBranchId = async (teacherId, branchName) => {
+    const name = normalizeBranchName(branchName);
+    if (!name) {
+      const err = new Error("branch_name is required");
+      err.status = 400;
+      throw err;
+    }
+
+    const { data: existing, error: lookupError } = await supabase
+      .from("branches")
+      .select("id")
+      .eq("teacher_id", teacherId)
+      .eq("name", name)
+      .eq("is_deleted", false)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    if (existing?.id) return existing.id;
+
+    const { data: created, error: createError } = await supabase
+      .from("branches")
+      .insert({ teacher_id: teacherId, name, is_deleted: false })
+      .select("id")
+      .single();
+    if (createError) throw createError;
+    return created.id;
+  };
+
   app.post(
     "/sync",
     requireTeacherAuth,
@@ -102,7 +134,7 @@ const createApp = (deps) => {
       const getStudentForTeacher = async (studentId) => {
         const { data, error } = await supabase
           .from("students")
-          .select("id, teacher_id, updated_at, is_deleted")
+          .select("id, teacher_id, branch_id, updated_at, is_deleted")
           .eq("id", studentId)
           .eq("teacher_id", teacherId)
           .maybeSingle();
@@ -147,6 +179,8 @@ const createApp = (deps) => {
             const payload = op?.data ?? {};
             const targetId = payload?.id ?? null;
             const rollNo = payload?.roll_no ?? null;
+            const branchName = payload?.branch_name;
+            const branchId = await getOrCreateBranchId(teacherId, branchName);
 
             if (action === "delete") {
               let existing = null;
@@ -156,6 +190,7 @@ const createApp = (deps) => {
                   .select("id, updated_at")
                   .eq("id", targetId)
                   .eq("teacher_id", teacherId)
+                  .eq("branch_id", branchId)
                   .maybeSingle();
                 if (error) throw error;
                 existing = data;
@@ -164,6 +199,7 @@ const createApp = (deps) => {
                   .from("students")
                   .select("id, updated_at")
                   .eq("teacher_id", teacherId)
+                  .eq("branch_id", branchId)
                   .eq("roll_no", rollNo)
                   .maybeSingle();
                 if (error) throw error;
@@ -191,6 +227,7 @@ const createApp = (deps) => {
                 .update({ is_deleted: true })
                 .eq("id", existing.id)
                 .eq("teacher_id", teacherId)
+                .eq("branch_id", branchId)
                 .select("id, updated_at")
                 .single();
               if (updateError) throw updateError;
@@ -221,6 +258,7 @@ const createApp = (deps) => {
                   .select("id, updated_at")
                   .eq("id", targetId)
                   .eq("teacher_id", teacherId)
+                  .eq("branch_id", branchId)
                   .maybeSingle();
                 if (error) throw error;
                 existing = data;
@@ -229,6 +267,7 @@ const createApp = (deps) => {
                   .from("students")
                   .select("id, updated_at")
                   .eq("teacher_id", teacherId)
+                  .eq("branch_id", branchId)
                   .eq("roll_no", parsedRoll)
                   .maybeSingle();
                 if (error) throw error;
@@ -238,7 +277,13 @@ const createApp = (deps) => {
               if (!existing) {
                 const { data: created, error: createError } = await supabase
                   .from("students")
-                  .insert({ teacher_id: teacherId, roll_no: parsedRoll, name, is_deleted: false })
+                  .insert({
+                    teacher_id: teacherId,
+                    branch_id: branchId,
+                    roll_no: parsedRoll,
+                    name,
+                    is_deleted: false,
+                  })
                   .select("id, updated_at")
                   .single();
                 if (createError) throw createError;
@@ -271,6 +316,7 @@ const createApp = (deps) => {
                 .update({ roll_no: parsedRoll, name, is_deleted: false })
                 .eq("id", existing.id)
                 .eq("teacher_id", teacherId)
+                .eq("branch_id", branchId)
                 .select("id, updated_at")
                 .single();
               if (updateError) throw updateError;
@@ -295,6 +341,8 @@ const createApp = (deps) => {
             const studentId = payload?.student_id;
             const date = typeof payload?.date === "string" ? payload.date.trim() : "";
             const status = typeof payload?.status === "string" ? payload.status.trim() : "";
+            const branchName = payload?.branch_name;
+            const branchId = await getOrCreateBranchId(teacherId, branchName);
 
             if (!studentId || !date) {
               rejected.push({ op_id: opId, entity, action, reason: "Missing student_id or date" });
@@ -307,6 +355,11 @@ const createApp = (deps) => {
               continue;
             }
 
+            if (studentRow.branch_id !== branchId) {
+              rejected.push({ op_id: opId, entity, action, reason: "Student does not belong to branch" });
+              continue;
+            }
+
             if (studentRow.is_deleted) {
               rejected.push({ op_id: opId, entity, action, reason: "Student is deleted" });
               continue;
@@ -316,6 +369,7 @@ const createApp = (deps) => {
               .from("attendance")
               .select("id, updated_at")
               .eq("teacher_id", teacherId)
+              .eq("branch_id", branchId)
               .eq("student_id", studentId)
               .eq("date", date)
               .maybeSingle();
@@ -344,6 +398,7 @@ const createApp = (deps) => {
                 .update({ is_deleted: true })
                 .eq("id", existing.id)
                 .eq("teacher_id", teacherId)
+                .eq("branch_id", branchId)
                 .select("id, updated_at")
                 .single();
               if (updateError) throw updateError;
@@ -370,6 +425,7 @@ const createApp = (deps) => {
                   .from("attendance")
                   .insert({
                     teacher_id: teacherId,
+                    branch_id: branchId,
                     student_id: studentId,
                     date,
                     status,
@@ -407,6 +463,7 @@ const createApp = (deps) => {
                 .update({ status, is_deleted: false })
                 .eq("id", existing.id)
                 .eq("teacher_id", teacherId)
+                .eq("branch_id", branchId)
                 .select("id, updated_at")
                 .single();
               if (updateError) throw updateError;
@@ -453,18 +510,75 @@ const createApp = (deps) => {
   );
 
   app.get(
-    "/students",
+    "/branches",
+    requireTeacherAuth,
     asyncHandler(async (req, res) => {
-      const teacherId = req.query.teacher_id;
+      const teacherId = req.teacher?.id;
+      if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
 
-      if (!teacherId) {
-        return res.status(400).json({ message: "teacher_id query parameter is required" });
+      const { data, error } = await supabase
+        .from("branches")
+        .select("id, name")
+        .eq("teacher_id", teacherId)
+        .eq("is_deleted", false)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        return respondWithError(res, error, "Failed to fetch branches");
       }
+
+      return res.json(data || []);
+    })
+  );
+
+  app.post(
+    "/branches",
+    requireTeacherAuth,
+    asyncHandler(async (req, res) => {
+      const teacherId = req.teacher?.id;
+      const { name } = req.body || {};
+
+      if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
+
+      const branchName = typeof name === "string" ? name.trim() : "";
+      if (!branchName) {
+        return res.status(400).json({ message: "name is required" });
+      }
+
+      const { data, error } = await supabase
+        .from("branches")
+        .insert({ teacher_id: teacherId, name: branchName, is_deleted: false })
+        .select("id, name")
+        .single();
+
+      if (error) {
+        if (error.code === "23505") {
+          return res.status(409).json({ message: "Branch already exists for this teacher" });
+        }
+        return respondWithError(res, error, "Failed to create branch");
+      }
+
+      return res.status(201).json(data);
+    })
+  );
+
+  app.get(
+    "/students",
+    requireTeacherAuth,
+    asyncHandler(async (req, res) => {
+      const teacherId = req.teacher?.id;
+      const branchName = req.query.branch_name;
+
+      if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
+
+      const branchId = await getOrCreateBranchId(teacherId, branchName);
 
       const { data, error } = await supabase
         .from("students")
         .select("id, roll_no, name")
         .eq("teacher_id", teacherId)
+        .eq("branch_id", branchId)
+        .eq("is_deleted", false)
         .order("roll_no", { ascending: true });
 
       if (error) {
@@ -477,15 +591,23 @@ const createApp = (deps) => {
 
   app.delete(
     "/students",
+    requireTeacherAuth,
     asyncHandler(async (req, res) => {
-      const teacherId = req.query.teacher_id;
+      const teacherId = req.teacher?.id;
       const rollNo = req.query.roll_no;
+      const branchName = req.query.branch_name;
 
-    if (!teacherId || !rollNo) {
+    if (!teacherId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!rollNo || !branchName) {
       return res
         .status(400)
-        .json({ message: "teacher_id and roll_no query parameters are required" });
+        .json({ message: "branch_name and roll_no query parameters are required" });
     }
+
+    const branchId = await getOrCreateBranchId(teacherId, branchName);
 
     const numericRoll = Number(rollNo);
     if (!Number.isInteger(numericRoll) || numericRoll <= 0) {
@@ -496,6 +618,7 @@ const createApp = (deps) => {
       .from("students")
       .select("id")
       .eq("teacher_id", teacherId)
+      .eq("branch_id", branchId)
       .eq("roll_no", numericRoll)
       .maybeSingle();
 
@@ -513,7 +636,8 @@ const createApp = (deps) => {
       .from("attendance")
       .delete()
       .eq("student_id", studentId)
-      .eq("teacher_id", teacherId);
+      .eq("teacher_id", teacherId)
+      .eq("branch_id", branchId);
 
     if (deleteAttendanceError) {
       return respondWithError(res, deleteAttendanceError, "Failed to delete attendance for student");
@@ -535,17 +659,24 @@ const createApp = (deps) => {
 
 app.post(
   "/students",
+  requireTeacherAuth,
   asyncHandler(async (req, res) => {
-    const { teacher_id: teacherId, roll_no: rollNo, name } = req.body || {};
+    const teacherId = req.teacher?.id;
+    const { roll_no: rollNo, name, branch_name: branchName } = req.body || {};
 
-    if (!teacherId || (!rollNo && rollNo !== 0) || !name?.trim()) {
+    if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
+
+    if ((!rollNo && rollNo !== 0) || !name?.trim() || !branchName?.trim()) {
       return res
         .status(400)
-        .json({ message: "teacher_id, roll_no, and name are required to add a student" });
+        .json({ message: "branch_name, roll_no, and name are required to add a student" });
     }
+
+    const branchId = await getOrCreateBranchId(teacherId, branchName);
 
     const payload = {
       teacher_id: teacherId,
+      branch_id: branchId,
       roll_no: Number(rollNo),
       name: name.trim(),
     };
@@ -569,12 +700,18 @@ app.post(
 
 app.post(
   "/attendance",
+  requireTeacherAuth,
   asyncHandler(async (req, res) => {
-    const { teacher_id: teacherId, records = [], date } = req.body || {};
+    const teacherId = req.teacher?.id;
+    const { records = [], date, branch_name: branchName } = req.body || {};
 
-    if (!teacherId) {
-      return res.status(400).json({ message: "teacher_id is required" });
+    if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
+
+    if (!branchName?.trim()) {
+      return res.status(400).json({ message: "branch_name is required" });
     }
+
+    const branchId = await getOrCreateBranchId(teacherId, branchName);
 
     if (!Array.isArray(records)) {
       return res.status(400).json({ message: "records must be an array" });
@@ -595,6 +732,7 @@ app.post(
       .from("attendance")
       .delete()
       .eq("teacher_id", teacherId)
+      .eq("branch_id", branchId)
       .eq("date", targetDate);
 
     if (deleteError) {
@@ -610,6 +748,7 @@ app.post(
       status: record.status,
       date: targetDate,
       teacher_id: teacherId,
+      branch_id: branchId,
     }));
 
     const { error: insertError } = await supabase.from("attendance").insert(rows);
@@ -624,18 +763,21 @@ app.post(
 
 app.get(
   "/attendance",
+  requireTeacherAuth,
   asyncHandler(async (req, res) => {
-    const teacherId = req.query.teacher_id;
+    const teacherId = req.teacher?.id;
     const targetDate = req.query.date || new Date().toISOString().split("T")[0];
+    const branchName = req.query.branch_name;
 
-    if (!teacherId) {
-      return res.status(400).json({ message: "teacher_id query parameter is required" });
-    }
+    if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
+
+    const branchId = await getOrCreateBranchId(teacherId, branchName);
 
     const { data, error } = await supabase
       .from("attendance")
       .select("student_id, status")
       .eq("teacher_id", teacherId)
+      .eq("branch_id", branchId)
       .eq("date", targetDate);
 
     if (error) {
@@ -786,28 +928,52 @@ app.get(
 
 app.get(
   "/export",
+  requireTeacherAuth,
   asyncHandler(async (req, res) => {
-    const teacherId = req.query.teacher_id;
+    const teacherId = req.teacher?.id;
     const exportDate = req.query.date;
+    const branchName = req.query.branch_name;
 
-    if (!teacherId) {
-      return res.status(400).json({ message: "teacher_id query parameter is required" });
-    }
+    if (!teacherId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { data: students, error: studentsError } = await supabase
-      .from("students")
-      .select("id, roll_no, name")
-      .eq("teacher_id", teacherId)
-      .order("roll_no", { ascending: true });
+    const branchId = branchName ? await getOrCreateBranchId(teacherId, branchName) : null;
 
-    if (studentsError) {
-      return respondWithError(res, studentsError, "Failed to build export");
+    let students = [];
+    if (branchId) {
+      const { data, error } = await supabase
+        .from("students")
+        .select("id, roll_no, name")
+        .eq("teacher_id", teacherId)
+        .eq("branch_id", branchId)
+        .eq("is_deleted", false)
+        .order("roll_no", { ascending: true });
+
+      if (error) {
+        return respondWithError(res, error, "Failed to retrieve students");
+      }
+      students = data || [];
+    } else {
+      const { data, error } = await supabase
+        .from("students")
+        .select("id, roll_no, name")
+        .eq("teacher_id", teacherId)
+        .eq("is_deleted", false)
+        .order("roll_no", { ascending: true });
+
+      if (error) {
+        return respondWithError(res, error, "Failed to build export");
+      }
+      students = data || [];
     }
 
     let attendanceQuery = supabase
       .from("attendance")
       .select("student_id, status, date")
       .eq("teacher_id", teacherId);
+
+    if (branchId) {
+      attendanceQuery = attendanceQuery.eq("branch_id", branchId);
+    }
 
     if (exportDate) {
       attendanceQuery = attendanceQuery.eq("date", exportDate);

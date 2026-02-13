@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { onSyncTelemetry, type SyncTelemetryEvent } from "../offline/telemetry";
+import { theme } from "../theme";
 
 type Status = {
   state: "idle" | "syncing" | "error";
@@ -56,19 +57,21 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   pillOk: {
-    backgroundColor: "#dcfce7",
+    backgroundColor: theme.colors.surface,
   },
   pillSyncing: {
-    backgroundColor: "#dbeafe",
+    backgroundColor: theme.colors.surface,
   },
   pillError: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: theme.colors.surface,
   },
   text: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
 });

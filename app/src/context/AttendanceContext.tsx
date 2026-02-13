@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { useAuth } from "./AuthContext";
+import { useBranch } from "./BranchContext";
 import { buildApiUrl } from "../env";
 import {
   getAttendanceForDateLocal,
@@ -112,6 +113,7 @@ type AttendanceProviderProps = {
 export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
   const { user, isLoading: authLoading, refreshSession, accessToken } = useAuth();
   const teacherId = user?.id ?? null;
+  const { selectedBranchLocalId, selectedBranch } = useBranch();
 
   const [selectedDate, setSelectedDateState] = useState(() => new Date());
   const [students, setStudents] = useState<Student[]>([]);
@@ -136,25 +138,62 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
       return;
     }
 
+    if (!selectedBranchLocalId) {
+      setStudents([]);
+      setRecords({});
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    const branchName = selectedBranch?.name ?? null;
+    if (!branchName) {
+      setStudents([]);
+      setRecords({});
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
       const online = await isOnline();
 
-      if (online) {
+      if (online && accessToken) {
         const studentResponse = await fetch(
-          buildApiUrl(`/students?teacher_id=${encodeURIComponent(teacherId)}`)
+          buildApiUrl(
+            `/students?teacher_id=${encodeURIComponent(teacherId)}&branch_name=${encodeURIComponent(branchName)}`
+          ),
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
         );
 
         if (studentResponse.ok) {
           const roster: Array<{ id: number; roll_no: number; name: string }> =
             await studentResponse.json();
-          await hydrateStudentsFromServer({ teacherId, students: roster || [] });
+          await hydrateStudentsFromServer({
+            teacherId,
+            branchLocalId: selectedBranchLocalId,
+            students: roster || [],
+          });
         }
 
         const attendanceResponse = await fetch(
-          buildApiUrl(`/attendance?teacher_id=${encodeURIComponent(teacherId)}&date=${isoDate}`)
+          buildApiUrl(
+            `/attendance?teacher_id=${encodeURIComponent(teacherId)}&branch_name=${encodeURIComponent(
+              branchName
+            )}&date=${isoDate}`
+          ),
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
         );
 
         if (attendanceResponse.ok) {
@@ -162,18 +201,23 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
             await attendanceResponse.json();
           await hydrateAttendanceFromServer({
             teacherId,
+            branchLocalId: selectedBranchLocalId,
             isoDate,
             records: (payload.records || []) as Array<{ student_id: number; status: AttendanceStatus }>,
           });
         }
       }
 
-      const localStudents = await listStudentsLocal(teacherId);
+      const localStudents = await listStudentsLocal(teacherId, selectedBranchLocalId);
       setStudents(
         localStudents.map((s) => ({ id: s.local_id, roll_no: s.roll_no, name: s.name }))
       );
 
-      const localAttendance = await getAttendanceForDateLocal({ teacherId, isoDate });
+      const localAttendance = await getAttendanceForDateLocal({
+        teacherId,
+        branchLocalId: selectedBranchLocalId,
+        isoDate,
+      });
       const nextRecords: Record<number, AttendanceStatus> = {};
       localAttendance.forEach((row) => {
         nextRecords[row.student_local_id] = row.status;
@@ -192,7 +236,7 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
     } finally {
       setLoading(false);
     }
-  }, [teacherId, isoDate, refreshSession]);
+  }, [teacherId, isoDate, refreshSession, selectedBranchLocalId, selectedBranch?.name]);
 
   useEffect(() => {
     if (!authLoading) {
@@ -250,6 +294,15 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
         return { success: false, error: "No active session. Please sign in again." };
       }
 
+      if (!selectedBranchLocalId) {
+        return { success: false, error: "Create a branch first." };
+      }
+
+      const branchName = selectedBranch?.name ?? null;
+      if (!branchName) {
+        return { success: false, error: "Select a branch first." };
+      }
+
       const sourceRecords = recordsOverride ?? records;
 
       try {
@@ -263,6 +316,7 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
           if (status) {
             const localRow = await upsertAttendanceLocal({
               teacherId,
+              branchLocalId: selectedBranchLocalId,
               isoDate,
               status,
               studentLocalId: student.id,
@@ -279,12 +333,14 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
                 student_id: studentServerId ? Number(studentServerId) : undefined,
                 date: isoDate,
                 status,
+                branch_name: branchName,
               },
               clientUpdatedAt,
             });
           } else {
             await softDeleteAttendanceLocal({
               teacherId,
+              branchLocalId: selectedBranchLocalId,
               isoDate,
               studentLocalId: student.id,
               clientUpdatedAt,
@@ -298,6 +354,7 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
                 student_local_id: student.id,
                 student_id: studentServerId ? Number(studentServerId) : undefined,
                 date: isoDate,
+                branch_name: branchName,
               },
               clientUpdatedAt,
             });
@@ -316,7 +373,7 @@ export const AttendanceProvider = ({ children }: AttendanceProviderProps) => {
         return { success: false, error: friendly };
       }
     },
-    [records, teacherId, isoDate, students, loadData, accessToken]
+    [records, teacherId, selectedBranchLocalId, selectedBranch?.name, isoDate, students, loadData, accessToken]
   );
 
   const value = useMemo<AttendanceContextValue>(

@@ -4,7 +4,6 @@ import {
   FlatList,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -17,6 +16,9 @@ import {
   formatDateForDisplay,
   useAttendance,
 } from "../context/AttendanceContext";
+import SyncStatusIndicator from "../components/SyncStatusIndicator";
+import { AppShell, Button, Card } from "../components/ui";
+import { theme } from "../theme";
 
 const AttendanceScreen: React.FC = () => {
   const {
@@ -222,17 +224,21 @@ const AttendanceScreen: React.FC = () => {
 
   const renderRosterRow = ({ item }: { item: typeof students[number] }) => {
     const status = draftRecords[item.id];
-    const pillStyle =
-      status === "Present"
-        ? styles.presentPill
-        : status === "Absent"
-        ? styles.absentPill
-        : styles.unmarkedPill;
-
     const pillText = status ?? "Unmarked";
+    const pillTextStyle =
+      status === "Present"
+        ? styles.presentPillText
+        : status === "Absent"
+        ? styles.absentPillText
+        : styles.unmarkedPillText;
 
     return (
-      <Pressable style={styles.studentRow} onPress={() => handleToggleStudent(item.id)}>
+      <Pressable
+        style={({ pressed }) => [styles.studentRow, pressed && styles.pressedRow]}
+        onPress={() => handleToggleStudent(item.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.name}, Roll ${item.roll_no}, ${pillText}`}
+      >
         <View style={styles.studentCircle}>
           <Text style={styles.studentInitial}>{item.name.charAt(0).toUpperCase()}</Text>
         </View>
@@ -240,18 +246,25 @@ const AttendanceScreen: React.FC = () => {
           <Text style={styles.studentName}>{item.name}</Text>
           <Text style={styles.studentRoll}>Roll {item.roll_no}</Text>
         </View>
-        <View style={[styles.statusPill, pillStyle]}>
-          <Text style={styles.statusPillText}>{pillText}</Text>
+        <View style={styles.statusPill}>
+          <Text style={[styles.statusPillText, pillTextStyle]}>{pillText}</Text>
         </View>
       </Pressable>
     );
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.headerCard}>
+    <AppShell>
+      <SyncStatusIndicator />
+
+      <Card style={styles.cardSpacing}>
         <Text style={styles.sectionLabel}>Attendance date</Text>
-        <Pressable style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
+        <Pressable
+          style={({ pressed }) => [styles.dateButton, pressed && styles.pressedRow]}
+          onPress={() => setShowDatePicker(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Change attendance date. Current date ${displayDate}`}
+        >
           <Text style={styles.dateText}>{displayDate}</Text>
           <Text style={styles.changeDate}>Change</Text>
         </Pressable>
@@ -264,15 +277,15 @@ const AttendanceScreen: React.FC = () => {
             maximumDate={new Date()}
           />
         )}
-      </View>
+      </Card>
 
       {loading ? (
         <View style={styles.loaderRow}>
-          <ActivityIndicator size="large" color="#1d4ed8" />
+          <ActivityIndicator size="large" color={theme.colors.text} />
         </View>
       ) : (
         <>
-          <View style={styles.statusCard}>
+          <Card style={styles.cardSpacing}>
             <Text style={styles.statusHeading}>{statusTitle}</Text>
             <Text style={styles.statusMessage}>
               {isAttendanceComplete
@@ -287,9 +300,9 @@ const AttendanceScreen: React.FC = () => {
             </Text>
             {displayError ? <Text style={styles.errorText}>{displayError}</Text> : null}
             {feedback && !displayError ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
-          </View>
+          </Card>
 
-          <View style={styles.currentStudentCard}>
+          <Card style={styles.cardSpacing}>
             <View style={styles.currentStudentHeader}>
               <Text style={styles.sectionLabel}>Taking attendance</Text>
               <Text style={styles.currentStudentName}>
@@ -301,6 +314,7 @@ const AttendanceScreen: React.FC = () => {
                   : "Add students in the roster tab to begin."}
               </Text>
             </View>
+
             <View style={styles.progressRow}>
               <Text style={styles.progressLabel}>Progress</Text>
               <Text style={styles.progressValue}>
@@ -309,52 +323,55 @@ const AttendanceScreen: React.FC = () => {
                   : `Student ${Math.min(activeIndex + 1, totalStudents)} of ${totalStudents}`}
               </Text>
             </View>
+
             <View style={styles.actionRow}>
               <Pressable
-                style={[styles.actionButton, styles.presentButton, disableActions && styles.disabledButton]}
+                style={({ pressed }) => [
+                  styles.markButton,
+                  pressed && styles.pressedRow,
+                  disableActions && styles.disabledButton,
+                ]}
                 onPress={() => handleMark("Present")}
                 disabled={disableActions}
+                accessibilityRole="button"
+                accessibilityLabel="Mark present"
               >
-                <Text style={styles.actionButtonText}>Mark present</Text>
+                <Text style={styles.presentMarkText}>Mark present</Text>
               </Pressable>
               <Pressable
-                style={[styles.actionButton, styles.absentButton, disableActions && styles.disabledButton]}
+                style={({ pressed }) => [
+                  styles.markButton,
+                  pressed && styles.pressedRow,
+                  disableActions && styles.disabledButton,
+                ]}
                 onPress={() => handleMark("Absent")}
                 disabled={disableActions}
+                accessibilityRole="button"
+                accessibilityLabel="Mark absent"
               >
-                <Text style={styles.actionButtonText}>Mark absent</Text>
+                <Text style={styles.absentMarkText}>Mark absent</Text>
               </Pressable>
             </View>
-            <Pressable
-              style={[styles.saveButton, (saving || disableActions) && styles.disabledButton]}
-              onPress={handleSave}
-              disabled={saving || disableActions}
-            >
-              {saving ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save today’s attendance</Text>
-              )}
-            </Pressable>
-          </View>
 
-          <View style={styles.listCard}>
+            <Button
+              label="Save today’s attendance"
+              onPress={handleSave}
+              loading={saving}
+              disabled={disableActions}
+              style={styles.saveButton}
+            />
+          </Card>
+
+          <Card>
             <View style={styles.rosterHeaderRow}>
-              <Text style={styles.sectionLabel}>Change Roster Status</Text>
-              <Pressable
-                style={[
-                  styles.rosterSaveButton,
-                  (!isDirty || savingRoster || loading) && styles.disabledButton,
-                ]}
+              <Text style={styles.sectionLabel}>Change roster status</Text>
+              <Button
+                label="Save"
                 onPress={handleSaveRoster}
-                disabled={!isDirty || savingRoster || loading}
-              >
-                {savingRoster ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text style={styles.rosterSaveButtonText}>Save</Text>
-                )}
-              </Pressable>
+                loading={savingRoster}
+                disabled={!isDirty || loading}
+                style={styles.inlineSaveButton}
+              />
             </View>
 
             {rosterError ? <Text style={styles.errorText}>{rosterError}</Text> : null}
@@ -364,8 +381,7 @@ const AttendanceScreen: React.FC = () => {
 
             {students.length === 0 ? (
               <Text style={styles.emptyState}>
-                No students available yet. Add students in the roster tab to start marking
-                attendance.
+                No students available yet. Add students in the roster tab to start marking attendance.
               </Text>
             ) : (
               <FlatList
@@ -373,43 +389,30 @@ const AttendanceScreen: React.FC = () => {
                 keyExtractor={(item) => String(item.id)}
                 renderItem={renderRosterRow}
                 scrollEnabled={false}
+                initialNumToRender={24}
+                maxToRenderPerBatch={24}
+                updateCellsBatchingPeriod={50}
+                windowSize={5}
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
               />
             )}
-          </View>
+          </Card>
         </>
       )}
-    </ScrollView>
+    </AppShell>
   );
 };
 
 export default AttendanceScreen;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f1f5f9",
-  },
-  content: {
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 160,
-  },
-  headerCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 10 },
-    shadowRadius: 20,
-    elevation: 4,
+  pressedRow: {
+    opacity: 0.8,
   },
   sectionLabel: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.muted,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 8,
@@ -423,53 +426,39 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   changeDate: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
   },
   loaderRow: {
     paddingVertical: 80,
     alignItems: "center",
   },
-  statusCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
+  cardSpacing: {
+    marginBottom: theme.spacing.lg,
   },
   statusHeading: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
     marginBottom: 6,
   },
   statusMessage: {
     fontSize: 15,
-    color: "#475569",
+    color: theme.colors.text2,
     marginBottom: 10,
   },
   errorText: {
     fontSize: 14,
-    color: "#dc2626",
+    color: theme.colors.danger,
     marginBottom: 6,
   },
   feedbackText: {
     fontSize: 14,
-    color: "#0f766e",
-  },
-  currentStudentCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 12 },
-    shadowRadius: 18,
-    elevation: 3,
+    color: theme.colors.text,
   },
   currentStudentHeader: {
     marginBottom: 16,
@@ -477,11 +466,11 @@ const styles = StyleSheet.create({
   currentStudentName: {
     fontSize: 24,
     fontWeight: "700",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   currentStudentMeta: {
     fontSize: 15,
-    color: "#475569",
+    color: theme.colors.text2,
     marginTop: 6,
   },
   progressRow: {
@@ -492,57 +481,43 @@ const styles = StyleSheet.create({
   },
   progressLabel: {
     fontSize: 14,
-    color: "#475569",
+    color: theme.colors.muted,
   },
   progressValue: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#1f2937",
+    color: theme.colors.text,
   },
   actionRow: {
     flexDirection: "row",
     gap: 12,
     marginBottom: 16,
   },
-  actionButton: {
+  markButton: {
     flex: 1,
     height: 52,
     borderRadius: 14,
     justifyContent: "center",
     alignItems: "center",
-  },
-  presentButton: {
-    backgroundColor: "#22c55e",
-  },
-  absentButton: {
-    backgroundColor: "#ef4444",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
   },
   disabledButton: {
     opacity: 0.6,
   },
-  actionButtonText: {
+  presentMarkText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#ffffff",
+    color: theme.colors.success,
+  },
+  absentMarkText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: theme.colors.danger,
   },
   saveButton: {
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: "#2563eb",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#ffffff",
-  },
-  listCard: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
+    marginTop: theme.spacing.sm,
   },
   rosterHeaderRow: {
     flexDirection: "row",
@@ -550,22 +525,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
-  rosterSaveButton: {
-    height: 36,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: "#2563eb",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  rosterSaveButtonText: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 13,
+  inlineSaveButton: {
+    height: 40,
+    paddingHorizontal: 16,
   },
   emptyState: {
     fontSize: 15,
-    color: "#475569",
+    color: theme.colors.text2,
     marginTop: 8,
   },
   studentRow: {
@@ -577,7 +543,7 @@ const styles = StyleSheet.create({
     height: 46,
     width: 46,
     borderRadius: 23,
-    backgroundColor: "#2563eb15",
+    backgroundColor: theme.colors.surface2,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
@@ -585,7 +551,7 @@ const styles = StyleSheet.create({
   studentInitial: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#2563eb",
+    color: theme.colors.text,
   },
   studentMeta: {
     flex: 1,
@@ -593,34 +559,37 @@ const styles = StyleSheet.create({
   studentName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
   studentRoll: {
     fontSize: 14,
-    color: "#64748b",
+    color: theme.colors.muted,
     marginTop: 2,
   },
   statusPill: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   statusPillText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0f172a",
+    color: theme.colors.text,
   },
-  presentPill: {
-    backgroundColor: "#bbf7d0",
+  presentPillText: {
+    color: theme.colors.success,
   },
-  absentPill: {
-    backgroundColor: "#fecaca",
+  absentPillText: {
+    color: theme.colors.danger,
   },
-  unmarkedPill: {
-    backgroundColor: "#e2e8f0",
+  unmarkedPillText: {
+    color: theme.colors.muted,
   },
   separator: {
     height: 1,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: theme.colors.divider,
   },
 });

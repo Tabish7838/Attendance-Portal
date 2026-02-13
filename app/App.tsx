@@ -9,6 +9,7 @@ import { Text } from "react-native";
 import AttendanceScreen from "./src/screens/AttendanceScreen";
 import { AttendanceProvider } from "./src/context/AttendanceContext";
 import { AuthProvider, useAuth } from "./src/context/AuthContext";
+import { BranchProvider } from "./src/context/BranchContext";
 import SplashScreen from "./src/screens/SplashScreen";
 import LoginScreen from "./src/screens/LoginScreen";
 import HomeScreen from "./src/screens/HomeScreen";
@@ -17,6 +18,7 @@ import RosterScreen from "./src/screens/RosterScreen";
 import SignupScreen from "./src/screens/SignupScreen";
 import { AuthStackParamList, RootTabParamList } from "./src/navigation/types";
 import SyncListener from "./src/offline/syncListener";
+import { theme } from "./src/theme";
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -76,7 +78,7 @@ const AppNavigation = () => {
         ...DefaultTheme,
         colors: {
           ...DefaultTheme.colors,
-          background: "#ffffff",
+          background: theme.colors.bg,
         },
       }}
     >
@@ -90,7 +92,9 @@ export default function App() {
     <AuthProvider>
       <StatusBar style="dark" />
       <SyncListener />
-      <AppNavigation />
+      <BranchProvider>
+        <AppNavigation />
+      </BranchProvider>
     </AuthProvider>
   );
 }
