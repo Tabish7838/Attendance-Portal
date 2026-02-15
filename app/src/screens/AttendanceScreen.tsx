@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -40,6 +41,9 @@ const AttendanceScreen: React.FC = () => {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedRecords, setSavedRecords] = useState<Record<number, AttendanceStatus> | null>(null);
+  const [rosterModalOpen, setRosterModalOpen] = useState(false);
+  const [rosterPage, setRosterPage] = useState(0);
 
   const [draftRecords, setDraftRecords] = useState<Record<number, AttendanceStatus>>({});
   const [savingRoster, setSavingRoster] = useState(false);
@@ -67,27 +71,64 @@ const AttendanceScreen: React.FC = () => {
       setActiveIndex(0);
       return;
     }
-
-    if (isAttendanceComplete) {
-      return;
-    }
-
-    if (records[students[activeIndex]?.id]) {
-      const nextIndex = students.findIndex((student) => !records[student.id]);
-      setActiveIndex(nextIndex === -1 ? 0 : nextIndex);
-    }
-  }, [students, records, activeIndex, isAttendanceComplete]);
+  }, [students]);
 
   useEffect(() => {
     setFeedback(null);
     setSaveError(null);
+    setSavedRecords(null);
+    setActiveIndex(0);
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (!loading) {
+      setSavedRecords(records);
+    }
+  }, [loading]);
+
+  const areRecordsEqual = useCallback(
+    (a: Record<number, AttendanceStatus> | null, b: Record<number, AttendanceStatus> | null) => {
+      if (!a || !b) return false;
+      for (const student of students) {
+        if (a[student.id] !== b[student.id]) return false;
+      }
+      return true;
+    },
+    [students]
+  );
+
+  const isAlreadySaved = useMemo(() => areRecordsEqual(records, savedRecords), [areRecordsEqual, records, savedRecords]);
 
   useEffect(() => {
     setDraftRecords(records);
     setRosterError(null);
     setRosterFeedback(null);
   }, [records]);
+
+  useEffect(() => {
+    if (rosterModalOpen) {
+      setRosterPage(0);
+    }
+  }, [rosterModalOpen]);
+
+  useEffect(() => {
+    setRosterPage((prev) => {
+      const pageSize = 10;
+      const totalPages = Math.max(1, Math.ceil(students.length / pageSize));
+      return Math.min(prev, totalPages - 1);
+    });
+  }, [students.length]);
+
+  const pageSize = 10;
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(students.length / pageSize)),
+    [students.length]
+  );
+  const rosterPageStart = rosterPage * pageSize;
+  const rosterPageStudents = useMemo(
+    () => students.slice(rosterPageStart, rosterPageStart + pageSize),
+    [students, rosterPageStart]
+  );
 
   const isDirty = useMemo(() => {
     const keys = new Set([...Object.keys(records), ...Object.keys(draftRecords)]);
@@ -194,6 +235,7 @@ const AttendanceScreen: React.FC = () => {
     const result = await saveAttendance();
     if (result.success) {
       setFeedback("Attendance saved successfully.");
+      setSavedRecords(records);
     } else if (result.error) {
       setSaveError(result.error);
     } else {
@@ -201,7 +243,7 @@ const AttendanceScreen: React.FC = () => {
     }
 
     setSaving(false);
-  }, [saveAttendance]);
+  }, [records, saveAttendance]);
 
   const statusTitle = useMemo(() => {
     if (isAttendanceComplete) {
@@ -221,6 +263,8 @@ const AttendanceScreen: React.FC = () => {
   }, [overallStatus, isAttendanceComplete]);
 
   const disableActions = loading || saving || totalStudents === 0;
+  const disableMarking = disableActions || isAttendanceComplete;
+  const disableSave = disableActions || isAlreadySaved;
 
   const renderRosterRow = ({ item }: { item: typeof students[number] }) => {
     const status = draftRecords[item.id];
@@ -240,7 +284,7 @@ const AttendanceScreen: React.FC = () => {
         accessibilityLabel={`${item.name}, Roll ${item.roll_no}, ${pillText}`}
       >
         <View style={styles.studentCircle}>
-          <Text style={styles.studentInitial}>{item.name.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.studentInitial}>{String(item.roll_no)}</Text>
         </View>
         <View style={styles.studentMeta}>
           <Text style={styles.studentName}>{item.name}</Text>
@@ -329,10 +373,10 @@ const AttendanceScreen: React.FC = () => {
                 style={({ pressed }) => [
                   styles.markButton,
                   pressed && styles.pressedRow,
-                  disableActions && styles.disabledButton,
+                  disableMarking && styles.disabledButton,
                 ]}
                 onPress={() => handleMark("Present")}
-                disabled={disableActions}
+                disabled={disableMarking}
                 accessibilityRole="button"
                 accessibilityLabel="Mark present"
               >
@@ -342,10 +386,10 @@ const AttendanceScreen: React.FC = () => {
                 style={({ pressed }) => [
                   styles.markButton,
                   pressed && styles.pressedRow,
-                  disableActions && styles.disabledButton,
+                  disableMarking && styles.disabledButton,
                 ]}
                 onPress={() => handleMark("Absent")}
-                disabled={disableActions}
+                disabled={disableMarking}
                 accessibilityRole="button"
                 accessibilityLabel="Mark absent"
               >
@@ -357,46 +401,115 @@ const AttendanceScreen: React.FC = () => {
               label="Save today’s attendance"
               onPress={handleSave}
               loading={saving}
-              disabled={disableActions}
+              disabled={disableSave}
               style={styles.saveButton}
             />
           </Card>
 
-          <Card>
-            <View style={styles.rosterHeaderRow}>
-              <Text style={styles.sectionLabel}>Change roster status</Text>
-              <Button
-                label="Save"
-                onPress={handleSaveRoster}
-                loading={savingRoster}
-                disabled={!isDirty || loading}
-                style={styles.inlineSaveButton}
-              />
-            </View>
+          <Button
+            label="Change roster status"
+            variant="secondary"
+            onPress={() => setRosterModalOpen(true)}
+            style={styles.changeRosterButton}
+          />
 
-            {rosterError ? <Text style={styles.errorText}>{rosterError}</Text> : null}
-            {rosterFeedback && !rosterError ? (
-              <Text style={styles.feedbackText}>{rosterFeedback}</Text>
-            ) : null}
-
-            {students.length === 0 ? (
-              <Text style={styles.emptyState}>
-                No students available yet. Add students in the roster tab to start marking attendance.
-              </Text>
-            ) : (
+          <Modal
+            visible={rosterModalOpen}
+            animationType="slide"
+            presentationStyle="fullScreen"
+            statusBarTranslucent
+            onRequestClose={() => setRosterModalOpen(false)}
+          >
+            <View style={styles.rosterModalRoot}>
               <FlatList
-                data={students}
+                data={rosterPageStudents}
                 keyExtractor={(item) => String(item.id)}
                 renderItem={renderRosterRow}
-                scrollEnabled={false}
                 initialNumToRender={24}
                 maxToRenderPerBatch={24}
                 updateCellsBatchingPeriod={50}
                 windowSize={5}
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
+                scrollEnabled={false}
+                contentContainerStyle={styles.rosterModalContent}
+                ListHeaderComponent={
+                  <>
+                    <View style={styles.rosterModalHeader}>
+                      <Button
+                        label="Back"
+                        variant="secondary"
+                        onPress={() => setRosterModalOpen(false)}
+                        style={styles.rosterBackButton}
+                      />
+                      <Text style={styles.rosterModalTitle}>Change roster status</Text>
+                      <Button
+                        label="Save"
+                        onPress={handleSaveRoster}
+                        loading={savingRoster}
+                        disabled={!isDirty || loading}
+                        style={styles.inlineSaveButton}
+                      />
+                    </View>
+
+                    {rosterError ? <Text style={styles.errorText}>{rosterError}</Text> : null}
+                    {rosterFeedback && !rosterError ? (
+                      <Text style={styles.feedbackText}>{rosterFeedback}</Text>
+                    ) : null}
+                  </>
+                }
+                ListFooterComponent={
+                  students.length > pageSize ? (
+                    <View style={styles.paginationRow}>
+                      <Pressable
+                        onPress={() => setRosterPage((p) => Math.max(0, p - 1))}
+                        disabled={rosterPage === 0}
+                        style={({ pressed }) => [
+                          styles.paginationButton,
+                          (pressed || rosterPage === 0) && styles.paginationButtonPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Previous page"
+                      >
+                        <Text style={[styles.paginationIcon, rosterPage === 0 && styles.paginationIconDisabled]}>
+                          ‹
+                        </Text>
+                        <Text style={[styles.paginationText, rosterPage === 0 && styles.paginationIconDisabled]}>
+                          Previous
+                        </Text>
+                      </Pressable>
+
+                      <Text style={styles.paginationMeta}>
+                        {rosterPageStart + 1}-{Math.min(rosterPageStart + pageSize, students.length)} of {students.length}
+                      </Text>
+
+                      <Pressable
+                        onPress={() => setRosterPage((p) => Math.min(totalPages - 1, p + 1))}
+                        disabled={rosterPage >= totalPages - 1}
+                        style={({ pressed }) => [
+                          styles.paginationButton,
+                          (pressed || rosterPage >= totalPages - 1) && styles.paginationButtonPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Next page"
+                      >
+                        <Text style={[styles.paginationText, rosterPage >= totalPages - 1 && styles.paginationIconDisabled]}>
+                          Next
+                        </Text>
+                        <Text style={[styles.paginationIcon, rosterPage >= totalPages - 1 && styles.paginationIconDisabled]}>
+                          ›
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null
+                }
+                ListEmptyComponent={
+                  <Text style={styles.emptyState}>
+                    No students available yet. Add students in the roster tab to start marking attendance.
+                  </Text>
+                }
               />
-            )}
-          </Card>
+            </View>
+          </Modal>
         </>
       )}
     </AppShell>
@@ -525,9 +638,82 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
+  rosterModalRoot: {
+    flex: 1,
+    backgroundColor: theme.colors.bg,
+  },
+  rosterModalContent: {
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: 56,
+    paddingBottom: theme.spacing.lg,
+  },
+  rosterModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: theme.spacing.sm,
+    columnGap: 10,
+  },
+  rosterModalTitle: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "800",
+    color: theme.colors.text,
+  },
   inlineSaveButton: {
     height: 40,
     paddingHorizontal: 16,
+  },
+  rosterBackButton: {
+    height: 40,
+    paddingHorizontal: 16,
+  },
+  changeRosterButton: {
+    marginBottom: theme.spacing.lg,
+  },
+  paginationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.divider,
+  },
+  paginationButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    minWidth: 110,
+    justifyContent: "center",
+  },
+  paginationButtonPressed: {
+    opacity: 0.55,
+  },
+  paginationIcon: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: theme.colors.text,
+  },
+  paginationText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: theme.colors.text,
+  },
+  paginationMeta: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: theme.colors.muted,
+  },
+  paginationIconDisabled: {
+    color: theme.colors.muted,
   },
   emptyState: {
     fontSize: 15,

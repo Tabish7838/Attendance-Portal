@@ -15,8 +15,10 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
+import { AppShell, Button, Card } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { AuthStackParamList } from "../navigation/types";
+import { theme } from "../theme";
 
 const getFriendlyAuthError = (error: any): string => {
   if (!error) {
@@ -69,66 +71,67 @@ const LoginScreen: React.FC = () => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Welcome back</Text>
-          <Text style={styles.subtitle}>Sign in to manage your class attendance.</Text>
+    <AppShell>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.content}>
+            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.subtitle}>Sign in to manage your class attendance.</Text>
 
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-              returnKeyType="next"
-            />
+            <Card style={styles.card}>
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={theme.colors.muted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                  returnKeyType="next"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Enter your password"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  style={styles.input}
+                  returnKeyType="done"
+                />
+                <Text style={styles.helper}>At least 6 characters.</Text>
+              </View>
+
+              <Button
+                label={isSubmitting ? "Signing in..." : "Sign in"}
+                onPress={handleSubmit}
+                loading={isSubmitting}
+                disabled={!isFormValid || isSubmitting}
+                style={styles.primaryButton}
+              />
+
+              <View style={styles.linkRow}>
+                <Text style={styles.linkPrompt}>New here?</Text>
+                <Pressable onPress={handleGoToSignup} disabled={isSubmitting}>
+                  <Text style={[styles.linkText, isSubmitting && styles.linkTextDisabled]}>
+                    Create account
+                  </Text>
+                </Pressable>
+              </View>
+            </Card>
           </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Enter your password"
-              secureTextEntry
-              style={styles.input}
-              returnKeyType="done"
-            />
-            <Text style={styles.helper}>At least 6 characters.</Text>
-          </View>
-
-          <Pressable
-            onPress={handleSubmit}
-            style={[
-              styles.button,
-              (!isFormValid || isSubmitting) && styles.buttonDisabled,
-            ]}
-            disabled={!isFormValid || isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.buttonText}>Sign in</Text>
-            )}
-          </Pressable>
-
-          <View style={styles.linkRow}>
-            <Text style={styles.linkPrompt}>New here?</Text>
-            <Pressable onPress={handleGoToSignup}>
-              <Text style={styles.linkText}>Create account</Text>
-            </Pressable>
-          </View>
-        </View>
-      </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </AppShell>
   );
 };
 
@@ -137,99 +140,73 @@ export default LoginScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "transparent",
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 72,
+    paddingTop: theme.spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#1f2933",
-    marginBottom: 8,
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.xs,
   },
   subtitle: {
-    fontSize: 16,
-    color: "#52606d",
-    marginBottom: 32,
+    fontSize: 14,
+    color: theme.colors.text2,
+    marginBottom: theme.spacing.lg,
+  },
+  card: {
+    padding: theme.spacing.lg,
   },
   formGroup: {
-    marginBottom: 24,
+    marginBottom: theme.spacing.md,
   },
   label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#364152",
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    color: theme.colors.muted,
+    marginBottom: theme.spacing.xs,
   },
   input: {
-    height: 48,
+    height: 46,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d9e2ec",
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
-    fontSize: 16,
-    color: "#1f2933",
-    backgroundColor: "#f9fbfd",
+    fontSize: 15,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.surface,
   },
   helper: {
-    marginTop: 8,
+    marginTop: theme.spacing.xs,
     fontSize: 12,
-    color: "#8292a0",
+    color: theme.colors.text2,
   },
-  inlineRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 10,
-  },
-  inlineLink: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#2563eb",
-  },
-  inlineLinkDisabled: {
-    color: "#93c5fd",
-  },
-  button: {
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#2563eb",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 12,
-    elevation: 4,
-    marginTop: 16,
-  },
-  buttonDisabled: {
-    backgroundColor: "#93c5fd",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  buttonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
+  primaryButton: {
+    marginTop: theme.spacing.sm,
   },
   linkRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 24,
+    marginTop: theme.spacing.md,
   },
   linkPrompt: {
     fontSize: 14,
-    color: "#52606d",
+    color: theme.colors.text2,
     marginRight: 6,
   },
   linkText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
+  },
+  linkTextDisabled: {
+    color: theme.colors.muted,
   },
 });

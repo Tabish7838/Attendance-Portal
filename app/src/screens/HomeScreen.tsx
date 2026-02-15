@@ -2,6 +2,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useMemo, useState } from "react";
 import {
   Linking,
+  Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -85,70 +87,97 @@ const HomeScreen: React.FC = () => {
       <Card style={styles.branchCard}>
         <Text style={styles.sectionLabel}>Branch</Text>
         <Pressable
-          onPress={() => setBranchMenuOpen((prev) => !prev)}
+          onPress={() => setBranchMenuOpen(true)}
           style={({ pressed }) => [styles.branchDropdown, pressed && styles.branchDropdownPressed]}
           accessibilityRole="button"
           accessibilityLabel={`Change branch. Current branch ${branchLabel}`}
         >
           <Text style={styles.branchName}>{branchLabel}</Text>
-          <Text style={styles.branchChevron}>{branchMenuOpen ? "▲" : "▼"}</Text>
+          <Text style={styles.branchChevron}>▼</Text>
         </Pressable>
 
         {branchesError ? <Text style={styles.errorText}>{branchesError}</Text> : null}
-
-        {branchMenuOpen && branches.length > 0 ? (
-          <View style={styles.branchMenu}>
-            {branches.map((b) => {
-              const active = b.local_id === selectedBranchLocalId;
-              return (
-                <Pressable
-                  key={b.local_id}
-                  onPress={async () => {
-                    await setSelectedBranchLocalId(b.local_id);
-                    setBranchMenuOpen(false);
-                  }}
-                  style={({ pressed }) => [
-                    styles.branchMenuItem,
-                    active && styles.branchMenuItemActive,
-                    pressed && styles.branchMenuItemPressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Switch to branch ${b.name}`}
-                >
-                  <Text style={[styles.branchMenuItemText, active && styles.branchMenuItemTextActive]}>
-                    {b.name}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {branches.length === 0 && !branchesLoading ? (
-          <Text style={styles.branchEmptyState}>
-            Create your first branch (class/section) to start adding students and taking attendance.
-          </Text>
-        ) : null}
-
-        <View style={styles.newBranchRow}>
-          <TextInput
-            value={newBranchName}
-            onChangeText={setNewBranchName}
-            placeholder="New branch name"
-            placeholderTextColor={theme.colors.muted}
-            style={styles.branchInput}
-            accessibilityLabel="New branch name"
-          />
-          <Button
-            label="Add"
-            onPress={handleCreateBranch}
-            loading={creatingBranch}
-            disabled={!newBranchName.trim()}
-            style={styles.branchAddButton}
-          />
-        </View>
-        {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
       </Card>
+
+      <Modal
+        visible={branchMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBranchMenuOpen(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setBranchMenuOpen(false)}>
+          <Pressable style={styles.modalPanel} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Select branch</Text>
+
+            {branches.length === 0 && !branchesLoading ? (
+              <Text style={styles.branchEmptyState}>
+                Create your first branch (class/section) to start adding students and taking attendance.
+              </Text>
+            ) : null}
+
+            {branches.length > 0 ? (
+              <View style={styles.branchMenu}>
+                <ScrollView style={styles.branchMenuScroll} contentContainerStyle={styles.branchMenuScrollContent}>
+                  {branches.map((b) => {
+                    const active = b.local_id === selectedBranchLocalId;
+                    return (
+                      <Pressable
+                        key={b.local_id}
+                        onPress={async () => {
+                          await setSelectedBranchLocalId(b.local_id);
+                          setBranchMenuOpen(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.branchMenuItem,
+                          active && styles.branchMenuItemActive,
+                          pressed && styles.branchMenuItemPressed,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Switch to branch ${b.name}`}
+                      >
+                        <Text
+                          style={[styles.branchMenuItemText, active && styles.branchMenuItemTextActive]}
+                        >
+                          {b.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <View style={styles.modalDivider} />
+
+            <Text style={styles.modalSubtitle}>Add new branch</Text>
+            <View style={styles.newBranchRow}>
+              <TextInput
+                value={newBranchName}
+                onChangeText={setNewBranchName}
+                placeholder="New branch name"
+                placeholderTextColor={theme.colors.muted}
+                style={styles.branchInput}
+                accessibilityLabel="New branch name"
+              />
+              <Button
+                label="Add"
+                onPress={handleCreateBranch}
+                loading={creatingBranch}
+                disabled={!newBranchName.trim()}
+                style={styles.branchAddButton}
+              />
+            </View>
+            {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+
+            <Button
+              label="Close"
+              variant="secondary"
+              onPress={() => setBranchMenuOpen(false)}
+              style={styles.modalCloseButton}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <AttendanceStats />
 
@@ -223,7 +252,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     borderRadius: 14,
     overflow: "hidden",
-    marginBottom: theme.spacing.md,
+  },
+  branchMenuScroll: {
+    maxHeight: 240,
+  },
+  branchMenuScrollContent: {
+    paddingBottom: 0,
   },
   branchMenuItem: {
     paddingHorizontal: 14,
@@ -249,6 +283,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.colors.text2,
     marginBottom: theme.spacing.md,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    padding: theme.spacing.lg,
+    justifyContent: "center",
+  },
+  modalPanel: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.card,
+    padding: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: theme.colors.muted,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: theme.spacing.sm,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: theme.colors.divider,
+    marginVertical: theme.spacing.md,
   },
   newBranchRow: {
     flexDirection: "row",
@@ -293,6 +359,9 @@ const styles = StyleSheet.create({
     color: theme.colors.text2,
   },
   actionButton: {
+    marginTop: theme.spacing.md,
+  },
+  modalCloseButton: {
     marginTop: theme.spacing.md,
   },
 });

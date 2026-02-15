@@ -15,10 +15,12 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
+import { AppShell, Button, Card } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { AuthStackParamList } from "../navigation/types";
 import { buildApiUrl } from "../env";
 import { supabase } from "../lib/supabase";
+import { theme } from "../theme";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 const RESEND_COOLDOWN_MS = 60_000;
@@ -179,121 +181,135 @@ const SignupScreen: React.FC = () => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.subtitle}>
-            Set up your teacher profile so you can manage attendance on the go.
-          </Text>
+    <AppShell>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.content}>
+            <Text style={styles.title}>Create your account</Text>
+            <Text style={styles.subtitle}>
+              Set up your teacher profile so you can manage attendance on the go.
+            </Text>
 
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="e.g. Mrs Sharma"
-              autoCapitalize="words"
-              autoCorrect={false}
-              style={styles.input}
-              returnKeyType="next"
-            />
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-              returnKeyType="next"
-              editable={step === "request" && !isSubmitting}
-            />
-          </View>
-
-          {step === "request" ? (
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Minimum 6 characters"
-                secureTextEntry
-                style={styles.input}
-                returnKeyType="done"
-              />
-              <Text style={styles.helper}>At least 6 characters.</Text>
-            </View>
-          ) : null}
-
-          {step === "verify" ? (
-            <>
+            <Card style={styles.card}>
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Verification code</Text>
+                <Text style={styles.label}>Name</Text>
                 <TextInput
-                  value={code}
-                  onChangeText={setCode}
-                  placeholder="Enter the code"
-                  keyboardType="number-pad"
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="e.g. Mrs Sharma"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  style={styles.input}
+                  returnKeyType="next"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={theme.colors.muted}
+                  keyboardType="email-address"
                   autoCapitalize="none"
                   autoCorrect={false}
                   style={styles.input}
-                  returnKeyType="done"
+                  returnKeyType="next"
+                  editable={step === "request" && !isSubmitting}
                 />
-                <Text style={styles.helper}>Check your email for the code.</Text>
-                <View style={styles.inlineRow}>
-                  <Pressable onPress={handleEditEmail} disabled={isSubmitting}>
-                    <Text style={styles.inlineLink}>Edit email</Text>
-                  </Pressable>
-                  <Pressable onPress={handleRequestCode} disabled={isSubmitting || !canResend}>
-                    <Text
-                      style={[
-                        styles.inlineLink,
-                        (!canResend || isSubmitting) && styles.inlineLinkDisabled,
-                      ]}
-                    >
-                      {canResend
-                        ? "Resend code"
-                        : `Resend in ${Math.ceil(resendRemainingMs / 1000)}s`}
-                    </Text>
-                  </Pressable>
-                </View>
               </View>
-            </>
-          ) : null}
 
-          <Pressable
-            onPress={step === "request" ? handleRequestCode : handleVerifyCode}
-            style={[
-              styles.button,
-              ((step === "request" && !isRequestValid) || (step === "verify" && !isCodeValid) || isSubmitting) &&
-                styles.buttonDisabled,
-            ]}
-            disabled={(step === "request" && !isRequestValid) || (step === "verify" && !isCodeValid) || isSubmitting}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.buttonText}>{step === "request" ? "Send code" : "Verify & create"}</Text>
-            )}
-          </Pressable>
+              {step === "request" ? (
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Password</Text>
+                  <TextInput
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Minimum 6 characters"
+                    placeholderTextColor={theme.colors.muted}
+                    secureTextEntry
+                    style={styles.input}
+                    returnKeyType="done"
+                  />
+                  <Text style={styles.helper}>At least 6 characters.</Text>
+                </View>
+              ) : null}
 
-          <View style={styles.linkRow}>
-            <Text style={styles.linkPrompt}>Already have an account?</Text>
-            <Pressable onPress={handleBackToLogin}>
-              <Text style={styles.linkText}>Back to login</Text>
-            </Pressable>
+              {step === "verify" ? (
+                <>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Verification code</Text>
+                    <TextInput
+                      value={code}
+                      onChangeText={setCode}
+                      placeholder="Enter the code"
+                      placeholderTextColor={theme.colors.muted}
+                      keyboardType="number-pad"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={styles.input}
+                      returnKeyType="done"
+                    />
+                    <Text style={styles.helper}>Check your email for the code.</Text>
+                    <View style={styles.inlineRow}>
+                      <Pressable onPress={handleEditEmail} disabled={isSubmitting}>
+                        <Text style={[styles.inlineLink, isSubmitting && styles.inlineLinkDisabled]}>Edit email</Text>
+                      </Pressable>
+                      <Pressable onPress={handleRequestCode} disabled={isSubmitting || !canResend}>
+                        <Text
+                          style={[
+                            styles.inlineLink,
+                            (!canResend || isSubmitting) && styles.inlineLinkDisabled,
+                          ]}
+                        >
+                          {canResend
+                            ? "Resend code"
+                            : `Resend in ${Math.ceil(resendRemainingMs / 1000)}s`}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
+              ) : null}
+
+              <Button
+                label={
+                  isSubmitting
+                    ? step === "request"
+                      ? "Sending..."
+                      : "Verifying..."
+                    : step === "request"
+                      ? "Send code"
+                      : "Verify & create"
+                }
+                onPress={step === "request" ? handleRequestCode : handleVerifyCode}
+                loading={isSubmitting}
+                disabled={
+                  (step === "request" && !isRequestValid) ||
+                  (step === "verify" && !isCodeValid) ||
+                  isSubmitting
+                }
+                style={styles.primaryButton}
+              />
+
+              <View style={styles.linkRow}>
+                <Text style={styles.linkPrompt}>Already have an account?</Text>
+                <Pressable onPress={handleBackToLogin} disabled={isSubmitting}>
+                  <Text style={[styles.linkText, isSubmitting && styles.linkTextDisabled]}>
+                    Back to login
+                  </Text>
+                </Pressable>
+              </View>
+            </Card>
           </View>
-        </View>
-      </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </AppShell>
   );
 };
 
@@ -302,99 +318,87 @@ export default SignupScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: "transparent",
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 72,
+    paddingTop: theme.spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#1f2933",
-    marginBottom: 8,
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.xs,
   },
   subtitle: {
-    fontSize: 16,
-    color: "#52606d",
-    marginBottom: 32,
+    fontSize: 14,
+    color: theme.colors.text2,
+    marginBottom: theme.spacing.lg,
+  },
+  card: {
+    padding: theme.spacing.lg,
   },
   formGroup: {
-    marginBottom: 24,
+    marginBottom: theme.spacing.md,
   },
   label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#364152",
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    color: theme.colors.muted,
+    marginBottom: theme.spacing.xs,
   },
   input: {
-    height: 48,
+    height: 46,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d9e2ec",
+    borderColor: theme.colors.border,
     paddingHorizontal: 16,
-    fontSize: 16,
-    color: "#1f2933",
-    backgroundColor: "#f9fbfd",
+    fontSize: 15,
+    color: theme.colors.text,
+    backgroundColor: theme.colors.surface,
   },
   helper: {
-    marginTop: 8,
+    marginTop: theme.spacing.xs,
     fontSize: 12,
-    color: "#8292a0",
+    color: theme.colors.text2,
   },
   inlineRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: theme.spacing.sm,
   },
   inlineLink: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
   },
   inlineLinkDisabled: {
-    color: "#93c5fd",
+    color: theme.colors.muted,
   },
-  button: {
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "#2563eb",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 12,
-    elevation: 4,
-    marginTop: 16,
-  },
-  buttonDisabled: {
-    backgroundColor: "#93c5fd",
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  buttonText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "600",
+  primaryButton: {
+    marginTop: theme.spacing.sm,
   },
   linkRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 24,
+    marginTop: theme.spacing.md,
   },
   linkPrompt: {
     fontSize: 14,
-    color: "#52606d",
+    color: theme.colors.text2,
     marginRight: 6,
   },
   linkText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2563eb",
+    color: theme.colors.text,
+  },
+  linkTextDisabled: {
+    color: theme.colors.muted,
   },
 });

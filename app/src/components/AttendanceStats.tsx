@@ -61,7 +61,7 @@ const AttendanceStatsCard: React.FC = () => {
         <DashboardCard
           title="Absent today"
           value={counts.absent}
-          footerText={`${counts.unmarked} unmarked`}
+          footerText=""
           containerStyle={styles.absentCard}
           valueStyle={styles.absentValue}
         />
@@ -89,8 +89,14 @@ const DashboardCard = memo(
   ({ title, value, footerText, containerStyle, valueStyle }: DashboardCardProps) => (
     <View style={[styles.dashboardCard, containerStyle]}>
       <Text style={styles.cardTitle}>{title}</Text>
-      <Text style={[styles.cardValue, valueStyle]}>{value}</Text>
-      {footerText ? <Text style={styles.cardFooter}>{footerText}</Text> : null}
+      <View style={styles.valueContainer}>
+        <Text style={[styles.cardValue, valueStyle]}>{value}</Text>
+      </View>
+      {footerText ? (
+        <Text style={styles.cardFooter}>{footerText}</Text>
+      ) : (
+        <View style={styles.footerSpacer} />
+      )}
     </View>
   )
 );
@@ -145,7 +151,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: theme.spacing.md,
     minHeight: 92,
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     borderWidth: 1,
     borderColor: theme.colors.border,
     width: "48%",
@@ -175,6 +181,10 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 6,
   },
+  valueContainer: {
+    flex: 1,
+    justifyContent: "center",
+  },
   totalValue: {
     color: theme.colors.text,
   },
@@ -191,5 +201,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.colors.text2,
     marginTop: theme.spacing.sm,
+  },
+  footerSpacer: {
+    marginTop: theme.spacing.sm,
+    height: 14,
   },
 });

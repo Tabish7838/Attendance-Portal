@@ -1,10 +1,11 @@
 import "react-native-gesture-handler";
 
+import type React from "react";
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { Text } from "react-native";
 
 import AttendanceScreen from "./src/screens/AttendanceScreen";
 import { AttendanceProvider } from "./src/context/AttendanceContext";
@@ -23,11 +24,13 @@ import { theme } from "./src/theme";
 const Tab = createBottomTabNavigator<RootTabParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 
-const tabIcons: Record<keyof RootTabParamList, string> = {
-  Home: "🏠",
-  Attendance: "✅",
-  Absences: "📉",
-  Roster: "�",
+type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
+
+const tabIcons: Record<keyof RootTabParamList, { focused: IoniconName; unfocused: IoniconName }> = {
+  Home: { focused: "home", unfocused: "home-outline" },
+  Attendance: { focused: "checkmark-done", unfocused: "checkmark-done-outline" },
+  Absences: { focused: "trending-down", unfocused: "trending-down-outline" },
+  Roster: { focused: "people", unfocused: "people-outline" },
 };
 
 const TabNavigator = () => (
@@ -35,19 +38,29 @@ const TabNavigator = () => (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: "#1d4ed8",
-        tabBarInactiveTintColor: "#94a3b8",
-        tabBarLabelStyle: { fontSize: 12, fontWeight: "600" },
-        tabBarStyle: {
-          height: 64,
-          paddingBottom: 10,
-          paddingTop: 10,
+        tabBarShowLabel: true,
+        tabBarActiveTintColor: theme.colors.text,
+        tabBarInactiveTintColor: theme.colors.muted,
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "700",
+          marginTop: -2,
         },
-        tabBarIcon: ({ focused, color }) => (
-          <Text style={{ fontSize: 20, color, opacity: focused ? 1 : 0.7 }}>
-            {tabIcons[route.name as keyof RootTabParamList]}
-          </Text>
-        ),
+        tabBarStyle: {
+          height: 70,
+          paddingTop: 8,
+          paddingBottom: 10,
+        },
+        tabBarItemStyle: {
+          justifyContent: "center",
+          alignItems: "center",
+        },
+        tabBarIcon: ({ focused, color }) => {
+          const icons = tabIcons[route.name as keyof RootTabParamList];
+          const name = focused ? icons.focused : icons.unfocused;
+          const size = route.name === "Attendance" ? 28 : 24;
+          return <Ionicons name={name} size={size} color={color} />;
+        },
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />

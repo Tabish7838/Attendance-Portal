@@ -293,6 +293,36 @@ export async function upsertStudentLocal(params: {
     return row;
   }
 
+  const existingByRoll = await db.getFirstAsync<StudentLocal>(
+    "SELECT * FROM students_local WHERE teacher_id = ? AND branch_local_id = ? AND roll_no = ?",
+    [params.teacherId, params.branchLocalId, params.rollNo]
+  );
+
+  if (existingByRoll?.local_id && existingByRoll.is_deleted === 1) {
+    await db.runAsync(
+      "UPDATE students_local SET server_id = ?, name = ?, is_deleted = 0, updated_at = ?, client_updated_at = ? WHERE local_id = ? AND teacher_id = ?",
+      [
+        params.serverId ?? null,
+        params.name,
+        updatedAt,
+        params.clientUpdatedAt,
+        existingByRoll.local_id,
+        params.teacherId,
+      ]
+    );
+
+    const row = await db.getFirstAsync<StudentLocal>(
+      "SELECT * FROM students_local WHERE local_id = ? AND teacher_id = ?",
+      [existingByRoll.local_id, params.teacherId]
+    );
+
+    if (!row) {
+      throw new Error("Failed to restore local student");
+    }
+
+    return row;
+  }
+
   const result = await db.runAsync(
     "INSERT INTO students_local (server_id, teacher_id, branch_local_id, roll_no, name, is_deleted, created_at, updated_at, client_updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
     [
